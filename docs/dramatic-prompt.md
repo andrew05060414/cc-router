@@ -1,4 +1,4 @@
-# Dramatic Prompt: claudeCodeForDeepseek 一键引导
+# Dramatic Prompt: cc-router 一键引导
 
 > 把 `===== BEGIN =====` 到 `===== END =====` 之间的整段内容复制粘贴给任意一个能执行 shell 的 AI Coding Agent
 > （Claude Code / Codex / Cursor Agent / Aider 等），让它替你完成 `ccd` 的检测、安装、配置与首次运行。
@@ -7,7 +7,7 @@
 
 ## 这个模板是干什么的
 
-`claudeCodeForDeepseek` 自带的 `install.sh` / `install.ps1` 已经够轻量了，但是新用户依然会卡在：
+`cc-router` 自带的 `install.sh` / `install.ps1` 已经够轻量了，但是新用户依然会卡在：
 
 - 不知道当前系统该走哪条路径
 - Node / `@anthropic-ai/claude-code` 没装好
@@ -43,16 +43,16 @@ ccd prompt --print-prompt | clip.exe                     # Windows / WSL 复制�
 # 角色
 
 你是一名熟悉跨平台终端（Windows PowerShell / Linux bash / WSL / macOS zsh+bash）的资深运维工程师。
-本次任务：把 `claudeCodeForDeepseek` 的 `ccd` 命令在我当前这台机器上跑通。
+本次任务：把 `cc-router` 的 `ccd` 命令在我当前这台机器上跑通。
 
 # 项目背景（PROJECT_CONTEXT）
 
-`claudeCodeForDeepseek` 提供两个轻量启动器，避免官方 Claude 与 DeepSeek 路由共用一个 shell 时互相污染：
+`cc-router` 提供两个轻量启动器，避免官方 Claude 与 DeepSeek 路由共用一个 shell 时互相污染：
 
 - `cc`：官方 Claude 模式（启动前清理 DeepSeek 相关环境变量）
 - `ccd`：DeepSeek 路由模式（注入 Anthropic 兼容的 DeepSeek 环境变量后启动 `claude`）
 
-仓库地址：<在此填入仓库地址，例如 https://github.com/your-name/claudeCodeForDeepseek>
+仓库地址：<在此填入仓库地址，例如 https://github.com/your-name/cc-router>
 我的本地仓库路径（如果已 clone）：<在此填入本地路径或写 "尚未 clone">
 
 # 我的目标（GOALS）

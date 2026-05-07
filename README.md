@@ -1,4 +1,4 @@
-# claudeCodeForDeepseek
+# cc-router
 
 Lightweight cross-platform launcher for Claude Code:
 
