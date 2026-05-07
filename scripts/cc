@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+show_help() {
+  cat <<'EOF'
+cc - Start Claude Code in official mode (clean env)
+
+Usage:
+  cc [claude args...]
+  cc resume [claude args...]
+  cc doctor
+  cc --help
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "help" || "${1:-}" == "-h" ]]; then
+  show_help
+  exit 0
+fi
+
+if [[ "${1:-}" == "doctor" ]]; then
+  issues=0
+
+  echo "== cc doctor =="
+  echo "Target: official Claude mode (clean env)"
+  echo
+
+  if command -v claude >/dev/null 2>&1; then
+    echo "OK: claude found at $(command -v claude)"
+  else
+    issues=1
+    echo "FAIL: claude not found in PATH"
+    echo "Fix (npm): npm install -g @anthropic-ai/claude-code"
+    echo "Fix (pnpm): pnpm add -g @anthropic-ai/claude-code"
+  fi
+  echo
+
+  need_local_bin_path_check=0
+  if [[ -x "${HOME}/.local/bin/cc" ]]; then
+    need_local_bin_path_check=1
+  fi
+  if [[ -x "${HOME}/.local/bin/ccd" ]]; then
+    need_local_bin_path_check=1
+  fi
+
+  if [[ "${need_local_bin_path_check}" -eq 1 ]]; then
+    case ":${PATH}:" in
+      *":${HOME}/.local/bin:"*)
+        echo "OK: ~/.local/bin is in PATH"
+        ;;
+      *)
+        issues=1
+        echo "FAIL: cc/ccd are in ~/.local/bin but PATH does not include it"
+        echo "Fix (current shell): export PATH=\"\$HOME/.local/bin:\$PATH\""
+        echo "Fix (persist bash): echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && . ~/.bashrc"
+        ;;
+    esac
+    echo
+  fi
+
+  stale_env=0
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    stale_env=1
+    echo "WARN: ANTHROPIC_BASE_URL is set in current shell: ${ANTHROPIC_BASE_URL}"
+  fi
+  if [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+    stale_env=1
+    echo "WARN: ANTHROPIC_AUTH_TOKEN is set in current shell"
+  fi
+  if [[ "${stale_env}" -eq 1 ]]; then
+    issues=1
+    echo "These can break official login if left over from proxy/routing."
+    echo "Fix (current shell): unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN"
+    echo "Fix (check startup files): rg -n \"ANTHROPIC_(BASE_URL|AUTH_TOKEN)\" ~/.bashrc ~/.profile ~/.zshrc 2>/dev/null"
+    echo "Fix (remove from startup): sed -i '/ANTHROPIC_BASE_URL\\|ANTHROPIC_AUTH_TOKEN/d' ~/.bashrc"
+  else
+    echo "OK: no stale ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN in current shell"
+  fi
+  echo
+
+  if [[ "${issues}" -eq 0 ]]; then
+    echo "Doctor result: healthy"
+  else
+    echo "Doctor result: action required (see Fix commands above)"
+  fi
+  exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "Claude Code CLI not found. Install first: npm install -g @anthropic-ai/claude-code" >&2
+  exit 1
+fi
+
+if [[ "${1:-}" == "resume" ]]; then
+  shift
+  set -- -c "$@"
+fi
+
+env -u ANTHROPIC_AUTH_TOKEN \
+    -u ANTHROPIC_API_KEY \
+    -u ANT_API_KEY \
+    -u ANTHROPIC_BASE_URL \
+    -u ANTHROPIC_MODEL \
+    -u ANTHROPIC_DEFAULT_OPUS_MODEL \
+    -u ANTHROPIC_DEFAULT_SONNET_MODEL \
+    -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
+    -u CLAUDE_CODE_SUBAGENT_MODEL \
+    -u CLAUDE_CODE_MAX_OUTPUT_TOKENS \
+    -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
+    -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK \
+    -u CLAUDE_CODE_EFFORT_LEVEL \
+    -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
+    claude "$@"
