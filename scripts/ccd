@@ -332,6 +332,20 @@ while [[ $# -gt 0 ]]; do
       fi
       echo
 
+      echo "MCP tool context-bloat protection (ENABLE_TOOL_SEARCH):"
+      if [[ -z "${CCD_TOOL_SEARCH+x}" ]]; then
+        echo "  ccd will inject ENABLE_TOOL_SEARCH=true (default)"
+        echo "  This forces deferred MCP tool loading; prevents the 30k+ token messages bloat"
+        echo "  See docs/SETUP-NOTES.md (section 1) for the full root-cause analysis"
+      elif [[ -z "${CCD_TOOL_SEARCH}" ]]; then
+        echo "  ccd will NOT inject ENABLE_TOOL_SEARCH (CCD_TOOL_SEARCH explicitly empty)"
+        echo "  This restores pre-fix behavior (eagerly loads all MCP tool schemas into messages)"
+        echo "  Re-enable with: unset CCD_TOOL_SEARCH"
+      else
+        echo "  ccd will inject ENABLE_TOOL_SEARCH=${CCD_TOOL_SEARCH} (from CCD_TOOL_SEARCH)"
+      fi
+      echo
+
       if [[ "${issues}" -eq 0 ]]; then
         echo "Doctor result: healthy"
       else
@@ -437,6 +451,15 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${max_output}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1'
 export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK='1'
 export CLAUDE_CODE_EFFORT_LEVEL='max'
+# Re-enable deferred MCP tool loading (disabled by Claude Code >= 2.1.70
+# for non-first-party hosts). Without this, all MCP tool schemas load
+# upfront and silently consume context. See docs/SETUP-NOTES.md and
+# https://github.com/anthropics/claude-code/issues/31936
+# Override with CCD_TOOL_SEARCH= (disable) or CCD_TOOL_SEARCH=auto (threshold).
+ccd_tool_search="${CCD_TOOL_SEARCH-true}"
+if [[ -n "${ccd_tool_search}" ]]; then
+  export ENABLE_TOOL_SEARCH="${ccd_tool_search}"
+fi
 if [[ "${autocompact_pct}" != "0" ]]; then
   export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="${autocompact_pct}"
 fi

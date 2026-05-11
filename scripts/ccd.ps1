@@ -92,6 +92,23 @@ function Show-Doctor {
   }
   Write-Host
 
+  Write-Host "MCP tool context-bloat protection (ENABLE_TOOL_SEARCH):"
+  $ccdToolSearchOverride = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'Process')
+  if (-not $ccdToolSearchOverride) { $ccdToolSearchOverride = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'User') }
+  if (-not $ccdToolSearchOverride) { $ccdToolSearchOverride = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'Machine') }
+  if ($null -eq $ccdToolSearchOverride) {
+    Write-Host "  ccd will inject ENABLE_TOOL_SEARCH=true (default)" -ForegroundColor Green
+    Write-Host "  This forces deferred MCP tool loading; prevents the 30k+ token messages bloat"
+    Write-Host "  See docs/SETUP-NOTES.md (section 1) for the full root-cause analysis"
+  } elseif ($ccdToolSearchOverride -eq '') {
+    Write-Host "  ccd will NOT inject ENABLE_TOOL_SEARCH (CCD_TOOL_SEARCH explicitly empty)" -ForegroundColor Yellow
+    Write-Host "  This restores pre-fix behavior (eagerly loads all MCP tool schemas into messages)"
+    Write-Host "  Re-enable with: Remove-Item Env:CCD_TOOL_SEARCH -ErrorAction SilentlyContinue"
+  } else {
+    Write-Host ("  ccd will inject ENABLE_TOOL_SEARCH={0} (from CCD_TOOL_SEARCH)" -f $ccdToolSearchOverride) -ForegroundColor Green
+  }
+  Write-Host
+
   if ($issues) {
     Write-Host "Doctor result: action required (see Fix commands above)" -ForegroundColor Yellow
   } else {
@@ -296,6 +313,18 @@ function Invoke-DeepSeekClaude {
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
     $env:CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = '1'
     $env:CLAUDE_CODE_EFFORT_LEVEL = 'max'
+    # Re-enable deferred MCP tool loading (disabled by Claude Code >= 2.1.70
+    # for non-first-party hosts). Without this, all MCP tool schemas load
+    # upfront and silently consume context. See docs/SETUP-NOTES.md and
+    # https://github.com/anthropics/claude-code/issues/31936
+    # Override with $env:CCD_TOOL_SEARCH = '' (disable) or 'auto' (threshold).
+    $ccdToolSearch = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'Process')
+    if (-not $ccdToolSearch) { $ccdToolSearch = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'User') }
+    if (-not $ccdToolSearch) { $ccdToolSearch = [Environment]::GetEnvironmentVariable('CCD_TOOL_SEARCH', 'Machine') }
+    if ($null -eq $ccdToolSearch) { $ccdToolSearch = 'true' }
+    if ($ccdToolSearch -ne '') {
+      $env:ENABLE_TOOL_SEARCH = $ccdToolSearch
+    }
     if ($AutocompactPct -gt 0) {
       $env:CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $AutocompactPct.ToString()
     }

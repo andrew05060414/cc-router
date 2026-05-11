@@ -7,8 +7,9 @@ cc - Start Claude Code in official mode (clean env)
 
 Usage:
   cc [claude args...]
+  cc -9 [claude args...]
   cc resume [claude args...]
-  cc doctor
+  cc doctor [detail|-v|--verbose]
   cc --help
 EOF
 }
@@ -18,11 +19,58 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
+routing_mode="official"
+if [[ "${1:-}" == "-9" || "${1:-}" == "--9router" ]]; then
+  routing_mode="9router"
+  shift
+fi
+
+# Resolve env var with explicit source label (only "shell" available in bash;
+# bash does not separate Process/User/Machine like PowerShell).
+get_env_with_source() {
+  local name="$1"
+  local val="${!name:-}"
+  if [[ -n "${val}" ]]; then
+    printf '%s\n' "${val}|shell"
+  else
+    printf '%s\n' "|<unset>"
+  fi
+}
+
+format_env_display() {
+  local name="$1"
+  local pair val source shown
+  pair="$(get_env_with_source "${name}")"
+  val="${pair%|*}"
+  source="${pair##*|}"
+  if [[ -n "${val}" ]]; then
+    shown="${val}"
+    if [[ "${name}" == *TOKEN* || "${name}" == *KEY* ]]; then
+      if (( ${#shown} > 12 )); then
+        shown="${shown:0:6}...${shown: -4}"
+      fi
+    fi
+    printf '  %-38s = %s  [%s]\n' "${name}" "${shown}" "${source}"
+  else
+    printf '  %-38s = <not set>\n' "${name}"
+  fi
+}
+
 if [[ "${1:-}" == "doctor" ]]; then
   issues=0
+  detail_mode=0
+  for arg in "${@:2}"; do
+    case "${arg}" in
+      detail|--detail|-d|--verbose|-v) detail_mode=1 ;;
+    esac
+  done
 
   echo "== cc doctor =="
-  echo "Target: official Claude mode (clean env)"
+  if [[ "${routing_mode}" == "9router" ]]; then
+    echo "Target: 9Router mode"
+  else
+    echo "Target: official Claude mode (clean env)"
+  fi
   echo
 
   if command -v claude >/dev/null 2>&1; then
@@ -78,6 +126,184 @@ if [[ "${1:-}" == "doctor" ]]; then
   fi
   echo
 
+  if [[ "${routing_mode}" == "9router" ]]; then
+    if [[ -n "${NINEROUTER_URL:-}" ]]; then
+      nr_base="${NINEROUTER_URL%/}"
+      echo "OK: NINEROUTER_URL=${nr_base}"
+      echo "Hint: health check -> ${nr_base}/api/health"
+      if health_resp="$(curl -fsS --max-time 5 "${nr_base}/api/health" 2>/dev/null)"; then
+        if [[ "${health_resp}" == *'"ok":true'* || "${health_resp}" == *'"ok": true'* ]]; then
+          echo "OK: 9Router health check returned ok=true"
+        else
+          echo "WARN: 9Router health check responded but ok!=true"
+        fi
+      else
+        echo "WARN: failed to reach ${nr_base}/api/health"
+      fi
+    else
+      issues=1
+      echo "FAIL: NINEROUTER_URL is required for cc -9 mode"
+      echo "Fix: export NINEROUTER_URL=\"http://localhost:20128\""
+    fi
+    if [[ -n "${NINEROUTER_KEY:-}" ]]; then
+      echo "OK: NINEROUTER_KEY detected"
+    else
+      echo "WARN: NINEROUTER_KEY not found (only fine if 9Router auth is disabled)"
+    fi
+
+    eff_opus="${NINEROUTER_OPUS_MODEL:-cc-pro}"
+    eff_sonnet="${NINEROUTER_SONNET_MODEL:-cc-normal}"
+    eff_haiku="${NINEROUTER_HAIKU_MODEL:-cc-lite}"
+    for pair in "opus:${eff_opus}" "sonnet:${eff_sonnet}" "haiku:${eff_haiku}"; do
+      slot="${pair%%:*}"
+      name="${pair#*:}"
+      case "${name}" in
+        claude-opus-*|claude-sonnet-*|claude-haiku-*)
+          printf 'OK:   %-6s -> %s  (claude family, client uses official defaults)\n' "${slot}" "${name}"
+          ;;
+        *)
+          printf 'INFO: %-6s -> %s  (custom name; client uses unknown-model defaults -- context unaffected)\n' "${slot}" "${name}"
+          ;;
+      esac
+    done
+
+    settings_path="${HOME}/.claude/settings.json"
+    if [[ -f "${settings_path}" ]]; then
+      if grep -Eq '"ANTHROPIC_DEFAULT_(OPUS|SONNET|HAIKU)_MODEL"[[:space:]]*:' "${settings_path}" 2>/dev/null; then
+        echo "NOTICE: ~/.claude/settings.json has ANTHROPIC_DEFAULT_*_MODEL entries in its env block."
+        echo "        These take precedence over what cc -9 injects. Remove them from settings.json's"
+        echo "        env block if you want NINEROUTER_*_MODEL (or cc-router defaults) to be authoritative."
+      fi
+    fi
+
+    echo
+  fi
+
+  if [[ "${detail_mode}" -eq 1 ]]; then
+    echo
+    echo "=== Detail ==="
+
+    echo
+    echo "[1] Launcher resolution"
+    if cc_path="$(command -v cc 2>/dev/null)"; then
+      echo "  cc on PATH        : ${cc_path}"
+      if [[ -L "${cc_path}" ]]; then
+        target="$(readlink -f "${cc_path}" 2>/dev/null || readlink "${cc_path}")"
+        echo "  cc symlink target : ${target}"
+      fi
+    else
+      echo "  cc on PATH        : NOT FOUND"
+    fi
+    echo "  this script path  : ${BASH_SOURCE[0]}"
+
+    echo
+    echo "[2] Current shell ANTHROPIC_* env (would be cleared by cc / cc -9)"
+    for n in ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST CLAUDE_CODE_SUBAGENT_MODEL; do
+      format_env_display "${n}"
+    done
+
+    echo
+    echo "[3] NINEROUTER_* env (bash sees a single shell scope)"
+    for n in NINEROUTER_URL NINEROUTER_KEY NINEROUTER_OPUS_MODEL NINEROUTER_SONNET_MODEL NINEROUTER_HAIKU_MODEL; do
+      format_env_display "${n}"
+    done
+
+    echo
+    echo "[4] Effective env that 'cc -9' would inject"
+    sim_base="${NINEROUTER_URL:-}"
+    if [[ -n "${sim_base}" ]]; then
+      sim_base="${sim_base%/}/v1"
+    else
+      sim_base="<NINEROUTER_URL missing>"
+    fi
+    sim_opus="${NINEROUTER_OPUS_MODEL:-cc-pro}"
+    sim_sonnet="${NINEROUTER_SONNET_MODEL:-cc-normal}"
+    sim_haiku="${NINEROUTER_HAIKU_MODEL:-cc-lite}"
+    sim_token="${NINEROUTER_KEY:-}"
+    if [[ -n "${sim_token}" ]]; then
+      sim_token_disp="${sim_token:0:6}..."
+    else
+      sim_token_disp="<not set>"
+    fi
+    printf '  %-42s= %s\n' "ANTHROPIC_BASE_URL"                       "${sim_base}"
+    printf '  %-42s= %s\n' "ANTHROPIC_AUTH_TOKEN"                     "${sim_token_disp}"
+    printf '  %-42s= %s\n' "ANTHROPIC_MODEL"                          "${sim_sonnet}"
+    printf '  %-42s= %s\n' "ANTHROPIC_DEFAULT_OPUS_MODEL"             "${sim_opus}"
+    printf '  %-42s= %s\n' "ANTHROPIC_DEFAULT_SONNET_MODEL"           "${sim_sonnet}"
+    printf '  %-42s= %s\n' "ANTHROPIC_DEFAULT_HAIKU_MODEL"            "${sim_haiku}"
+    printf '  %-42s= %s\n' "CLAUDE_CODE_SUBAGENT_MODEL"               "${sim_haiku}"
+    printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "1"
+    printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK" "1"
+    printf '  %-42s= %s\n' "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"     "<unset>"
+    sim_tool_search="${NINEROUTER_TOOL_SEARCH-true}"
+    if [[ -z "${sim_tool_search}" ]]; then
+      printf '  %-42s= %s\n' "ENABLE_TOOL_SEARCH" "<unset>  (NINEROUTER_TOOL_SEARCH explicitly empty)"
+      echo "    -> MCP tools will load eagerly into messages bucket (~30k+ extra)"
+    else
+      printf '  %-42s= %s\n' "ENABLE_TOOL_SEARCH" "${sim_tool_search}  (forces deferred MCP tool loading)"
+      echo "    -> Requires 9Router to forward tool_reference blocks. If you see 400 errors,"
+      echo "       set NINEROUTER_TOOL_SEARCH='' or 'auto' to disable."
+    fi
+
+    echo
+    echo "[5] ~/.claude/settings.json check"
+    settings_path="${HOME}/.claude/settings.json"
+    echo "  path              : ${settings_path}"
+    if [[ -f "${settings_path}" ]]; then
+      echo "  exists            : YES"
+      if command -v jq >/dev/null 2>&1; then
+        if has_env="$(jq -r 'has("env")' "${settings_path}" 2>/dev/null)"; then
+          if [[ "${has_env}" == "true" ]]; then
+            echo "  env block         : PRESENT (may override 'cc -9' process env in some Claude Code versions)"
+            jq -r '.env | to_entries[] | "    \(.key) = \(.value)"' "${settings_path}" 2>/dev/null | \
+              sed -E 's/(_(TOKEN|KEY)\s*=\s*)([A-Za-z0-9_-]{6})[A-Za-z0-9_-]+([A-Za-z0-9_-]{4})/\1\3...\4/'
+          else
+            echo "  env block         : <none> (good)"
+          fi
+        else
+          echo "  env block         : (jq parse failed)"
+        fi
+      else
+        if grep -q '"env"[[:space:]]*:' "${settings_path}" 2>/dev/null; then
+          echo "  env block         : PRESENT (install jq for content listing)"
+        else
+          echo "  env block         : <none> (good)"
+        fi
+      fi
+    else
+      echo "  exists            : NO (using built-in defaults only)"
+    fi
+
+    echo
+    echo "[6] Shell startup files (does cc come from here?)"
+    for f in "${HOME}/.bashrc" "${HOME}/.bash_profile" "${HOME}/.profile" "${HOME}/.zshrc"; do
+      if [[ -f "${f}" ]]; then
+        if grep -Eq '(^|[[:space:]])cc[[:space:]]*\(\)|alias[[:space:]]+cc=|function[[:space:]]+cc' "${f}" 2>/dev/null; then
+          echo "  [has cc] ${f}"
+        else
+          echo "  [no cc]  ${f}"
+        fi
+      else
+        echo "  [<missing>] ${f}"
+      fi
+    done
+
+    echo
+    echo "[7] Common things to check if context bloats"
+    echo "  - Restart ALL Claude Code windows after editing scripts/env. Running processes hold a snapshot."
+    echo "  - Confirm 'cc' resolves to your installed cc-router script (see [1])."
+    echo "  - Confirm ENABLE_TOOL_SEARCH is 'true' in section [4] (this is what keeps MCP tools deferred)."
+    echo "  - Confirm 9Router exposes the model aliases shown in section [4] (cc-pro / cc-normal / cc-lite by default)."
+    echo "  - If MCP tools list is huge, disable unused MCP servers via 'claude mcp list' / 'claude mcp remove <name>'."
+    echo "  - Inside Claude Code: '/context' should show a 'System tools' bucket. If absent, ENABLE_TOOL_SEARCH may have been stripped by 9Router."
+    echo
+    echo "[8] Quick A/B"
+    echo "  Window 1:  cc      -> /context  (official baseline)"
+    echo "  Window 2:  cc -9   -> /context  (compare buckets)"
+    echo "  Healthy diff: similar System tools (~6-10k), Messages < 6k, total < 30k after 'hi'."
+  fi
+
+  echo
   if [[ "${issues}" -eq 0 ]]; then
     echo "Doctor result: healthy"
   else
@@ -96,18 +322,101 @@ if [[ "${1:-}" == "resume" ]]; then
   set -- -c "$@"
 fi
 
-env -u ANTHROPIC_AUTH_TOKEN \
-    -u ANTHROPIC_API_KEY \
-    -u ANT_API_KEY \
-    -u ANTHROPIC_BASE_URL \
-    -u ANTHROPIC_MODEL \
-    -u ANTHROPIC_DEFAULT_OPUS_MODEL \
-    -u ANTHROPIC_DEFAULT_SONNET_MODEL \
-    -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
-    -u CLAUDE_CODE_SUBAGENT_MODEL \
-    -u CLAUDE_CODE_MAX_OUTPUT_TOKENS \
-    -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
-    -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK \
-    -u CLAUDE_CODE_EFFORT_LEVEL \
-    -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
-    claude "$@"
+if [[ "${routing_mode}" == "9router" ]]; then
+  if [[ -z "${NINEROUTER_URL:-}" ]]; then
+    echo "NINEROUTER_URL is required for cc -9 mode. Example: export NINEROUTER_URL=\"http://localhost:20128\"" >&2
+    exit 1
+  fi
+  nr_base="${NINEROUTER_URL%/}"
+  # Model names exposed to Claude Code as the three default-slot aliases.
+  # Custom names like 'cc-pro/cc-normal/cc-lite' DO route through 9Router fine;
+  # the only side effect is that the client falls back to unknown-model defaults
+  # for things like max output tokens, model intro text, and the title-bar label.
+  # Tool schemas and context behavior are unaffected (handled by ENABLE_TOOL_SEARCH).
+  # Override per-shell via NINEROUTER_{OPUS,SONNET,HAIKU}_MODEL.
+  nr_opus_model="${NINEROUTER_OPUS_MODEL:-cc-pro}"
+  nr_sonnet_model="${NINEROUTER_SONNET_MODEL:-cc-normal}"
+  nr_haiku_model="${NINEROUTER_HAIKU_MODEL:-cc-lite}"
+  # CRITICAL: Claude Code >= 2.1.70 disables MCP tool_reference blocks (and
+  # therefore deferred MCP tool loading / MCPSearch) by default whenever
+  # ANTHROPIC_BASE_URL points at a non-first-party host. That makes ALL MCP
+  # tool schemas get serialized into the first user message, inflating the
+  # messages bucket by 30k+ tokens for users with many MCP servers enabled.
+  # ENABLE_TOOL_SEARCH=true forces deferred loading back on. Requires the
+  # upstream proxy (9Router) to forward `tool_reference` blocks correctly.
+  # See: https://code.claude.com/docs/en/env-vars#enable_tool_search
+  # See: https://github.com/anthropics/claude-code/issues/31936
+  # Set NINEROUTER_TOOL_SEARCH= (empty) or =auto to fall back if 9Router
+  # rejects tool_reference with a 400.
+  nr_tool_search="${NINEROUTER_TOOL_SEARCH-true}"
+  if [[ -n "${NINEROUTER_KEY:-}" ]]; then
+    env -u ANTHROPIC_AUTH_TOKEN \
+        -u ANTHROPIC_API_KEY \
+        -u ANT_API_KEY \
+        -u ANTHROPIC_BASE_URL \
+        -u ANTHROPIC_MODEL \
+        -u ANTHROPIC_DEFAULT_OPUS_MODEL \
+        -u ANTHROPIC_DEFAULT_SONNET_MODEL \
+        -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
+        -u CLAUDE_CODE_SUBAGENT_MODEL \
+        -u CLAUDE_CODE_MAX_OUTPUT_TOKENS \
+        -u CLAUDE_CODE_EFFORT_LEVEL \
+        -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
+        -u CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST \
+        -u ENABLE_TOOL_SEARCH \
+        ANTHROPIC_BASE_URL="${nr_base}/v1" \
+        ANTHROPIC_MODEL="${nr_sonnet_model}" \
+        ANTHROPIC_DEFAULT_OPUS_MODEL="${nr_opus_model}" \
+        ANTHROPIC_DEFAULT_SONNET_MODEL="${nr_sonnet_model}" \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="${nr_haiku_model}" \
+        CLAUDE_CODE_SUBAGENT_MODEL="${nr_haiku_model}" \
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+        CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
+        ${nr_tool_search:+ENABLE_TOOL_SEARCH="${nr_tool_search}"} \
+        ANTHROPIC_AUTH_TOKEN="${NINEROUTER_KEY}" \
+        claude "$@"
+  else
+    env -u ANTHROPIC_AUTH_TOKEN \
+        -u ANTHROPIC_API_KEY \
+        -u ANT_API_KEY \
+        -u ANTHROPIC_BASE_URL \
+        -u ANTHROPIC_MODEL \
+        -u ANTHROPIC_DEFAULT_OPUS_MODEL \
+        -u ANTHROPIC_DEFAULT_SONNET_MODEL \
+        -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
+        -u CLAUDE_CODE_SUBAGENT_MODEL \
+        -u CLAUDE_CODE_MAX_OUTPUT_TOKENS \
+        -u CLAUDE_CODE_EFFORT_LEVEL \
+        -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
+        -u CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST \
+        -u ENABLE_TOOL_SEARCH \
+        ANTHROPIC_BASE_URL="${nr_base}/v1" \
+        ANTHROPIC_MODEL="${nr_sonnet_model}" \
+        ANTHROPIC_DEFAULT_OPUS_MODEL="${nr_opus_model}" \
+        ANTHROPIC_DEFAULT_SONNET_MODEL="${nr_sonnet_model}" \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="${nr_haiku_model}" \
+        CLAUDE_CODE_SUBAGENT_MODEL="${nr_haiku_model}" \
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+        CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
+        ${nr_tool_search:+ENABLE_TOOL_SEARCH="${nr_tool_search}"} \
+        claude "$@"
+  fi
+else
+  env -u ANTHROPIC_AUTH_TOKEN \
+      -u ANTHROPIC_API_KEY \
+      -u ANT_API_KEY \
+      -u ANTHROPIC_BASE_URL \
+      -u ANTHROPIC_MODEL \
+      -u ANTHROPIC_DEFAULT_OPUS_MODEL \
+      -u ANTHROPIC_DEFAULT_SONNET_MODEL \
+      -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
+      -u CLAUDE_CODE_SUBAGENT_MODEL \
+      -u CLAUDE_CODE_MAX_OUTPUT_TOKENS \
+      -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
+      -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK \
+      -u CLAUDE_CODE_EFFORT_LEVEL \
+      -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
+      -u ENABLE_TOOL_SEARCH \
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 \
+      claude "$@"
+fi

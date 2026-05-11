@@ -3,7 +3,13 @@
 Lightweight cross-platform launcher for Claude Code:
 
 - `cc` = official Claude mode (cleans DeepSeek routing env vars)
+- `cc -9` = 9Router mode (maps to OpenAI-compatible 9Router gateway)
 - `ccd` = DeepSeek mode (sets Anthropic-compatible DeepSeek env vars)
+
+> **Hitting weird `/context` bloat, model name issues, or PowerShell profile
+> quirks?** See [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md) — it documents
+> known gotchas (especially the Claude Code 2.1.70 MCP tool schema bloat
+> that affected both `cc -9` and `ccd`) and copy-paste fixes.
 
 Supported now:
 
@@ -40,9 +46,28 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 cc
+cc -9
+cc -9 resume
 cc --model sonnet
 cc resume
 cc doctor
+cc -9 doctor
+```
+
+`cc -9 doctor` will also probe `${NINEROUTER_URL}/api/health` when URL is set.
+
+9Router env:
+
+```bash
+export NINEROUTER_URL="http://localhost:20128"
+export NINEROUTER_KEY="sk-..."   # optional when 9Router auth disabled
+```
+
+PowerShell:
+
+```powershell
+$env:NINEROUTER_URL = "http://localhost:20128"
+$env:NINEROUTER_KEY = "sk-..."   # optional when 9Router auth disabled
 ```
 
 ### DeepSeek mode
@@ -102,6 +127,11 @@ export PATH="$HOME/.local/bin:$PATH"
 unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
 export DEEPSEEK_API_KEY="your_key"
 ```
+
+For verbose diagnostics with a full env / launcher / settings.json
+breakdown, use `cc -9 doctor detail` (or `cc doctor detail` / `ccd doctor`).
+For the underlying root causes behind common bloat / routing issues, see
+[`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md).
 
 Supported `ccd` options:
 
