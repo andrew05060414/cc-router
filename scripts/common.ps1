@@ -17,7 +17,8 @@ $script:CCDS_ENV_KEYS = @(
   'CLAUDE_CODE_EFFORT_LEVEL',
   'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE',
   'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
-  'ENABLE_TOOL_SEARCH'
+  'ENABLE_TOOL_SEARCH',
+  'CLAUDE_CODE_USE_POWERSHELL_TOOL'
 )
 
 function Get-CCDSProcessEnvBackup {
@@ -49,6 +50,26 @@ function Assert-ClaudeCodeInstalled {
   if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     throw "Claude Code CLI not found. Install first: npm install -g @anthropic-ai/claude-code"
   }
+}
+
+function Test-WindowsOS {
+  return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows)
+}
+
+# Claude Code defaults to a Bash-based shell tool; on Windows opt into the native
+# PowerShell tool unless the process already had CLAUDE_CODE_USE_POWERSHELL_TOOL set.
+function Initialize-ClaudeCodePowerShellToolEnv {
+  param([hashtable]$Backup)
+  $key = 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+  if ($Backup -and $Backup.ContainsKey($key)) {
+    Set-Item -Path ("Env:{0}" -f $key) -Value $Backup[$key]
+    return
+  }
+  if (-not (Test-WindowsOS)) {
+    return
+  }
+  Set-Item -Path ("Env:{0}" -f $key) -Value '1'
 }
 
 function Get-DeepSeekToken {

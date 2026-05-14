@@ -302,6 +302,7 @@ function Invoke-DeepSeekClaude {
   $bak = Get-CCDSProcessEnvBackup
   try {
     Clear-CCDSEnv
+    Initialize-ClaudeCodePowerShellToolEnv $bak
     $env:ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:ANTHROPIC_MODEL = $Model

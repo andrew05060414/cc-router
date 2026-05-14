@@ -32,6 +32,7 @@ function Invoke-OfficialClaude {
   $bak = Get-CCDSProcessEnvBackup
   try {
     Clear-CCDSEnv
+    Initialize-ClaudeCodePowerShellToolEnv $bak
     # Ignore provider routing keys in settings files; route by wrapper env only.
     $env:CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1'
     & claude @ClaudeArgs
@@ -75,6 +76,7 @@ function Invoke-NineRouterClaude {
   $bak = Get-CCDSProcessEnvBackup
   try {
     Clear-CCDSEnv
+    Initialize-ClaudeCodePowerShellToolEnv $bak
     # NOTE: deliberately NOT setting CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1.
     # Empirically that flag forces Claude Code into a fallback path where the
     # full system tools + MCP tools schema is serialized into the first user
