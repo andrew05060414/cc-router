@@ -25,13 +25,59 @@ cc_router_require_jq() {
   fi
 }
 
+cc_router_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "${s}"
+}
+
+cc_router_bool_normalize() {
+  cc_router_trim "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+}
+
+# Affirmative: y/Y, yes/Yes, true, on, 1, etc.
 cc_router_truthy() {
   local v
-  v="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  v="$(cc_router_bool_normalize "$1")"
   case "${v}" in
-    1 | true | yes | on | enable | enabled) return 0 ;;
+    y | yes | ye | yeah | yep | yea | true | 1 | on | enable | enabled | sure | ok) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# Negative: n/N, no/No, false, off, 0, etc. (not "none" — that is a separate config value.)
+cc_router_falsy() {
+  local v
+  v="$(cc_router_bool_normalize "$1")"
+  case "${v}" in
+    n | no | false | 0 | off | disable | disabled | nah) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cc_router_parse_bool() {
+  local raw="$1"
+  local default="${2:-false}"
+  local v
+  v="$(cc_router_bool_normalize "${raw}")"
+  if [[ -z "${v}" ]]; then
+    if cc_router_truthy "${default}"; then
+      printf 'true\n'
+    else
+      printf 'false\n'
+    fi
+    return 0
+  fi
+  if cc_router_truthy "${v}"; then
+    printf 'true\n'
+    return 0
+  fi
+  if cc_router_falsy "${v}"; then
+    printf 'false\n'
+    return 0
+  fi
+  return 1
 }
 
 cc_router_config_ensure() {
@@ -72,17 +118,20 @@ cc_router_config_get() {
 cc_router_config_set_bool() {
   local key="$1"
   local value="$2"
-  local file tmp bool_json
+  local file tmp parsed
   cc_router_require_jq || return 1
   cc_router_config_ensure
   file="$(cc_router_config_file)"
-  if cc_router_truthy "${value}"; then
-    bool_json=true
-  else
-    bool_json=false
+  if ! parsed="$(cc_router_parse_bool "${value}" false)"; then
+    echo "cc config: expected on/off, y/n, yes/no (got: ${value})" >&2
+    return 2
   fi
   tmp="$(mktemp)"
-  jq --arg k "${key}" --argjson v "${bool_json}" '.[$k] = $v' "${file}" >"${tmp}"
+  if [[ "${parsed}" == "true" ]]; then
+    jq --arg k "${key}" '.[$k] = true' "${file}" >"${tmp}"
+  else
+    jq --arg k "${key}" '.[$k] = false' "${file}" >"${tmp}"
+  fi
   mv "${tmp}" "${file}"
 }
 
@@ -100,8 +149,13 @@ cc_router_config_set_string() {
 
 cc_router_allow_dangerously_skip_permissions_enabled() {
   if [[ -n "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS:-}" ]]; then
-    cc_router_truthy "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS}"
-    return $?
+    if cc_router_truthy "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS}"; then
+      return 0
+    fi
+    if cc_router_falsy "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS}"; then
+      return 1
+    fi
+    return 1
   fi
   cc_router_truthy "$(cc_router_config_get allowDangerouslySkipPermissions false)"
 }
@@ -387,13 +441,21 @@ EOF
 }
 
 cc_router_config_setup() {
-  local ans target
+  local ans target parsed
   cc_router_config_ensure
   echo "== cc-router config setup =="
   echo "Config file: $(cc_router_config_file)"
   echo
   read -r -p "Pass --allow-dangerously-skip-permissions on every cc / cc -9 / ccd launch? [y/N]: " ans
-  if cc_router_truthy "${ans:-n}"; then
+  ans="$(cc_router_trim "${ans}")"
+  if [[ -z "${ans}" ]]; then
+    ans=n
+  fi
+  if ! parsed="$(cc_router_parse_bool "${ans}" n)"; then
+    echo "  → unrecognized '${ans}'; use y/yes or n/no (default: disabled)" >&2
+    parsed=false
+  fi
+  if [[ "${parsed}" == "true" ]]; then
     cc_router_config_set_bool allowDangerouslySkipPermissions true
     echo "  → enabled"
   else
@@ -416,7 +478,9 @@ cc_router_config_setup() {
   echo
   if [[ "${target}" != "none" ]]; then
     read -r -p "Also set permissions.defaultMode to bypassPermissions in that file? [y/N]: " ans
-    if cc_router_truthy "${ans:-n}"; then
+    ans="$(cc_router_trim "${ans}")"
+    [[ -z "${ans}" ]] && ans=n
+    if parsed="$(cc_router_parse_bool "${ans}" n 2>/dev/null)" && [[ "${parsed}" == "true" ]]; then
       cc_router_config_claude_set permissions.defaultMode bypassPermissions "${target}"
     fi
   fi
@@ -464,11 +528,7 @@ cc_router_config_dispatch() {
       val="$2"
       case "${key}" in
         allowDangerouslySkipPermissions)
-          if cc_router_truthy "${val}"; then
-            cc_router_config_set_bool "${key}" true
-          else
-            cc_router_config_set_bool "${key}" false
-          fi
+          cc_router_config_set_bool "${key}" "${val}" || return $?
           echo "Set ${key}=$(cc_router_config_get "${key}" false)"
           ;;
         claudePermissionsTarget)

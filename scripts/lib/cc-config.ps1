@@ -45,17 +45,48 @@ function Write-CcRouterConfig {
   $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path -Encoding UTF8
 }
 
+function Get-CcRouterBoolNormalized {
+  param([string]$Value)
+  if ($null -eq $Value) { return '' }
+  return $Value.Trim().ToLowerInvariant()
+}
+
 function Test-CcRouterTruthy {
   param([string]$Value)
-  switch ($Value.ToLowerInvariant()) {
-    { $_ -in @('1', 'true', 'yes', 'on', 'enable', 'enabled') } { return $true }
+  switch (Get-CcRouterBoolNormalized $Value) {
+    { $_ -in @('y', 'yes', 'ye', 'yeah', 'yep', 'yea', 'true', '1', 'on', 'enable', 'enabled', 'sure', 'ok') } { return $true }
     default { return $false }
   }
 }
 
+function Test-CcRouterFalsy {
+  param([string]$Value)
+  switch (Get-CcRouterBoolNormalized $Value) {
+    { $_ -in @('n', 'no', 'false', '0', 'off', 'disable', 'disabled', 'nah') } { return $true }
+    default { return $false }
+  }
+}
+
+function ConvertTo-CcRouterBool {
+  param(
+    [string]$Value,
+    [string]$Default = 'false'
+  )
+  $v = Get-CcRouterBoolNormalized $Value
+  if ([string]::IsNullOrWhiteSpace($v)) {
+    if (Test-CcRouterTruthy $Default) { return $true }
+    return $false
+  }
+  if (Test-CcRouterTruthy $v) { return $true }
+  if (Test-CcRouterFalsy $v) { return $false }
+  throw "Expected on/off, y/n, yes/no (got: $Value)"
+}
+
 function Test-CcRouterAllowDangerouslySkipPermissions {
   if ($env:CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS) {
-    return (Test-CcRouterTruthy $env:CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS)
+    if (Test-CcRouterTruthy $env:CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS) { return $true }
+    if (Test-CcRouterFalsy $env:CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS) { return $false }
+    return $false
   }
   $cfg = Read-CcRouterConfig
   return [bool]$cfg.allowDangerouslySkipPermissions
@@ -267,8 +298,14 @@ function Invoke-CcRouterConfigSetup {
   Write-Host "Config file: $(Get-CcRouterConfigPath)"
   Write-Host ''
   $ans = Read-Host 'Pass --allow-dangerously-skip-permissions on every cc / cc -9 / ccd launch? [y/N]'
+  $ans = if ($ans) { $ans.Trim() } else { '' }
   if ([string]::IsNullOrWhiteSpace($ans)) { $ans = 'n' }
-  $cfg.allowDangerouslySkipPermissions = (Test-CcRouterTruthy $ans)
+  try {
+    $cfg.allowDangerouslySkipPermissions = (ConvertTo-CcRouterBool $ans 'n')
+  } catch {
+    Write-Warning "Unrecognized '$ans'; defaulting to disabled (use y/yes or n/no)."
+    $cfg.allowDangerouslySkipPermissions = $false
+  }
   Write-Host ''
   Write-Host 'Where should cc config claude write permission settings by default?'
   Write-Host '  1) none    — only cc-router config.json'
@@ -283,9 +320,14 @@ function Invoke-CcRouterConfigSetup {
   Write-CcRouterConfig $cfg
   if ($cfg.claudePermissionsTarget -ne 'none') {
     $ans2 = Read-Host "Also set permissions.defaultMode to bypassPermissions in that file? [y/N]"
+    $ans2 = if ($ans2) { $ans2.Trim() } else { '' }
     if ([string]::IsNullOrWhiteSpace($ans2)) { $ans2 = 'n' }
-    if (Test-CcRouterTruthy $ans2) {
-      Set-CcRouterClaudeSetting -DotPath 'permissions.defaultMode' -Value 'bypassPermissions' -Scope $cfg.claudePermissionsTarget
+    try {
+      if (ConvertTo-CcRouterBool $ans2 'n') {
+        Set-CcRouterClaudeSetting -DotPath 'permissions.defaultMode' -Value 'bypassPermissions' -Scope $cfg.claudePermissionsTarget
+      }
+    } catch {
+      Write-Warning "Skipped bypassPermissions (unrecognized answer: $ans2)."
     }
   }
   Write-Host ''
@@ -314,7 +356,7 @@ function Invoke-CcRouterConfigCommand {
       $cfg = Read-CcRouterConfig
       switch ($key) {
         'allowDangerouslySkipPermissions' {
-          $cfg.allowDangerouslySkipPermissions = (Test-CcRouterTruthy $val)
+          $cfg.allowDangerouslySkipPermissions = (ConvertTo-CcRouterBool $val 'false')
         }
         'claudePermissionsTarget' {
           if ($val -notin @('none', 'global', 'project')) {
