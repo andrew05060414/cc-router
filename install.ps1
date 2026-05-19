@@ -8,12 +8,18 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $binDir = Join-Path $HOME '.ccdeepseek\bin'
 $shareDir = Join-Path $HOME '.ccdeepseek\share'
+$routerLibDir = Join-Path $shareDir 'cc-router\lib'
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $shareDir -Force | Out-Null
+New-Item -ItemType Directory -Path $routerLibDir -Force | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $root 'scripts\cc.ps1') -Destination (Join-Path $binDir 'cc.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\ccd.ps1') -Destination (Join-Path $binDir 'ccd.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\common.ps1') -Destination (Join-Path $binDir 'common.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $root 'scripts\lib\cc-config.ps1') -Destination (Join-Path $routerLibDir 'cc-config.ps1') -Force
+if (Test-Path -LiteralPath (Join-Path $root 'config.example.json')) {
+  Copy-Item -LiteralPath (Join-Path $root 'config.example.json') -Destination (Join-Path $shareDir 'cc-router\config.example.json') -Force
+}
 if (Test-Path -LiteralPath (Join-Path $root 'docs\dramatic-prompt.md')) {
   Copy-Item -LiteralPath (Join-Path $root 'docs\dramatic-prompt.md') -Destination (Join-Path $shareDir 'dramatic-prompt.md') -Force
 }
@@ -37,3 +43,6 @@ if ($AddToProfile) {
   Write-Host "function cc { & '$binDir\cc.ps1' @args }"
   Write-Host "function ccd { & '$binDir\ccd.ps1' @args }"
 }
+
+Write-Host "cc-router config (optional): cc config setup" -ForegroundColor Cyan
+Write-Host "  -> %USERPROFILE%\.config\cc-router\config.json"

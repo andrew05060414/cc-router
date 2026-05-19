@@ -328,7 +328,7 @@ function Invoke-DeepSeekClaude {
     if ($AutocompactPct -gt 0) {
       $env:CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $AutocompactPct.ToString()
     }
-    & claude @ClaudeArgs
+    Invoke-CcRouterClaude @ClaudeArgs
   } finally {
     Clear-CCDSEnv
     Restore-CCDSProcessEnv $bak

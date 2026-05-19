@@ -12,6 +12,7 @@ Usage:
   cc -9 [claude args...]
   cc resume [claude args...]
   cc doctor [detail|-v|--verbose]
+  cc config [show|setup|set|claude ...]
   cc --help
 
 Examples:
@@ -34,7 +35,7 @@ function Invoke-OfficialClaude {
     Clear-CCDSEnv
     # Ignore provider routing keys in settings files; route by wrapper env only.
     $env:CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1'
-    & claude @ClaudeArgs
+    Invoke-CcRouterClaude @ClaudeArgs
   } finally {
     Restore-CCDSProcessEnv $bak
   }
@@ -110,7 +111,7 @@ function Invoke-NineRouterClaude {
     if ($token) {
       $env:ANTHROPIC_AUTH_TOKEN = $token
     }
-    & claude @ClaudeArgs
+    Invoke-CcRouterClaude @ClaudeArgs
   } finally {
     Clear-CCDSEnv
     Restore-CCDSProcessEnv $bak
@@ -396,6 +397,19 @@ if ($cmd -eq 'doctor') {
     }
   }
   Show-Doctor -NineRouter:$nineRouterMode -Detail:$detailMode
+  exit 0
+}
+
+if ($cmd -eq 'config') {
+  $configArgs = @()
+  if ($effectiveArgs.Count -gt 1) {
+    $configArgs = $effectiveArgs[1..($effectiveArgs.Count - 1)]
+  }
+  if (Get-Command Invoke-CcRouterConfigCommand -ErrorAction SilentlyContinue) {
+    Invoke-CcRouterConfigCommand $configArgs
+  } else {
+    throw 'cc-config.ps1 not found. Re-run install.ps1 from cc-router.'
+  }
   exit 0
 }
 

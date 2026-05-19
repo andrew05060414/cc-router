@@ -56,6 +56,42 @@ cc -9 doctor
 
 `cc -9 doctor` will also probe `${NINEROUTER_URL}/api/health` when URL is set.
 
+### Permission / bypass settings (`cc config`)
+
+cc-router keeps its own small config file (separate from Claude Code):
+
+- **Linux/macOS:** `~/.config/cc-router/config.json`
+- **Windows:** `%USERPROFILE%\.config\cc-router\config.json`
+
+Interactive setup:
+
+```bash
+cc config setup
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `allowDangerouslySkipPermissions` | When `true`, every `cc` / `cc -9` / `ccd` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
+| `claudePermissionsTarget` | Default file for `cc config claude …`: `none`, `global` (`~/.claude/settings.json`), or `project` (`<repo>/.claude/settings.json`) |
+
+Examples:
+
+```bash
+cc config set allowDangerouslySkipPermissions on
+cc config set claudePermissionsTarget global
+cc config claude set permissions.defaultMode acceptEdits --global
+cc config claude enable-bypass-permissions --project
+cc config show
+```
+
+One-shot without editing JSON:
+
+```bash
+CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS=1 cc
+```
+
+See `config.example.json` in the repo root.
+
 9Router env:
 
 ```bash

@@ -57,3 +57,15 @@ function Get-DeepSeekToken {
   if (-not $token) { $token = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY', 'Machine') }
   return $token
 }
+
+$configCandidates = @(
+  (Join-Path $PSScriptRoot 'lib\cc-config.ps1')
+  (Join-Path $HOME '.ccdeepseek\share\cc-router\lib\cc-config.ps1')
+  (Join-Path $HOME '.local\share\cc-router\lib\cc-config.ps1')
+)
+foreach ($cfgPath in $configCandidates) {
+  if (Test-Path -LiteralPath $cfgPath) {
+    . $cfgPath
+    break
+  }
+}
