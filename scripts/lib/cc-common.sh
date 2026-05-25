@@ -89,7 +89,12 @@ cc_router_config_ensure() {
     cat >"${file}" <<'EOF'
 {
   "allowDangerouslySkipPermissions": false,
-  "claudePermissionsTarget": "none"
+  "claudePermissionsTarget": "none",
+  "cachePromptEnvEnabled": true,
+  "cacheFixEnabled": true,
+  "cacheFixUrl": "http://127.0.0.1:9801",
+  "cacheFix9routerEnabled": true,
+  "nineRouterUrl": "http://127.0.0.1:20128"
 }
 EOF
   fi
@@ -147,6 +152,98 @@ cc_router_config_set_string() {
   mv "${tmp}" "${file}"
 }
 
+cc_router_cache_fix_enabled() {
+  if [[ -n "${CC_CACHE_FIX_ENABLED:-}" ]]; then
+    cc_router_truthy "${CC_CACHE_FIX_ENABLED}"
+    return $?
+  fi
+  cc_router_truthy "$(cc_router_config_get cacheFixEnabled true)"
+}
+
+cc_router_cache_fix_9router_enabled() {
+  if [[ -n "${CC_CACHE_FIX_9ROUTER_ENABLED:-}" ]]; then
+    cc_router_truthy "${CC_CACHE_FIX_9ROUTER_ENABLED}"
+    return $?
+  fi
+  cc_router_truthy "$(cc_router_config_get cacheFix9routerEnabled true)"
+}
+
+cc_router_cache_prompt_env_enabled() {
+  if [[ -n "${CC_CACHE_PROMPT_ENV_ENABLED:-}" ]]; then
+    cc_router_truthy "${CC_CACHE_PROMPT_ENV_ENABLED}"
+    return $?
+  fi
+  cc_router_truthy "$(cc_router_config_get cachePromptEnvEnabled true)"
+}
+
+# Real 9Router gateway (OAuth routing target). NINEROUTER_URL env wins over config.
+cc_router_ninerouter_real_url() {
+  if [[ -n "${NINEROUTER_URL:-}" ]]; then
+    printf '%s\n' "${NINEROUTER_URL%/}"
+    return 0
+  fi
+  cc_router_config_get nineRouterUrl "http://127.0.0.1:20128" | sed 's|/*$||'
+}
+
+# Host Claude Code talks to (cache-fix proxy when cc -9 chaining is enabled).
+cc_router_ninerouter_client_base_url() {
+  if cc_router_cache_fix_9router_enabled; then
+    cc_router_cache_fix_url
+  else
+    cc_router_ninerouter_real_url
+  fi
+}
+
+cc_router_print_cache_fix_start_hint() {
+  local upstream cf
+  upstream="$(cc_router_ninerouter_real_url)"
+  cf="$(cc_router_cache_fix_url)"
+  echo "  CACHE_FIX_PROXY_UPSTREAM=${upstream} node \"\$(npm root -g)/claude-code-cache-fix/proxy/server.mjs\" &"
+  echo "  curl -fsS ${cf}/health"
+}
+
+cc_router_cache_fix_url() {
+  local url
+  if [[ -n "${CC_CACHE_FIX_URL:-}" ]]; then
+    printf '%s\n' "${CC_CACHE_FIX_URL%/}"
+    return 0
+  fi
+  url="$(cc_router_config_get cacheFixUrl "http://127.0.0.1:9801")"
+  printf '%s\n' "${url%/}"
+}
+
+# Prompt-cache hygiene for all launch modes (official, cc -9, ccd).
+# Attribution header breaks third-party prompt caches; git status busts prefix.
+# Override: CC_ATTRIBUTION_HEADER, CC_DISABLE_GIT_INSTRUCTIONS (empty disables git flag).
+cc_router_export_cache_prompt_env() {
+  local attr git
+  if ! cc_router_cache_prompt_env_enabled; then
+    return 0
+  fi
+  attr="${CC_ATTRIBUTION_HEADER-false}"
+  git="${CC_DISABLE_GIT_INSTRUCTIONS-1}"
+  export CLAUDE_CODE_ATTRIBUTION_HEADER="${attr}"
+  if [[ -n "${git}" ]]; then
+    export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS="${git}"
+  else
+    unset CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS
+  fi
+}
+
+cc_router_probe_cache_fix_health() {
+  local base="$1"
+  local health_url resp
+  base="${base%/}"
+  health_url="${base}/health"
+  if resp="$(curl -fsS --max-time 5 "${health_url}" 2>/dev/null)"; then
+    if [[ "${resp}" == *'"ok":true'* || "${resp}" == *'"ok": true'* || "${resp}" == *'"status":"ok"'* ]]; then
+      return 0
+    fi
+    return 1
+  fi
+  return 1
+}
+
 cc_router_allow_dangerously_skip_permissions_enabled() {
   if [[ -n "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS:-}" ]]; then
     if cc_router_truthy "${CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS}"; then
@@ -197,6 +294,64 @@ cc_router_args_has_skip_permissions_flag() {
     fi
   done
   return 1
+}
+
+cc_router_map_model_alias() {
+  local raw="$1"
+  local opus_model="$2"
+  local sonnet_model="$3"
+  local haiku_model="$4"
+  case "${raw}" in
+    opus|claude-opus-*)
+      printf '%s\n' "${opus_model}"
+      ;;
+    sonnet|claude-sonnet-*)
+      printf '%s\n' "${sonnet_model}"
+      ;;
+    haiku|claude-haiku-*)
+      printf '%s\n' "${haiku_model}"
+      ;;
+    *)
+      printf '%s\n' "${raw}"
+      ;;
+  esac
+}
+
+cc_router_normalize_model_args() {
+  local opus_model="$1"
+  local sonnet_model="$2"
+  local haiku_model="$3"
+  local arg raw mapped
+  shift 3
+  CC_ROUTER_NORMALIZED_ARGS=()
+  while (($# > 0)); do
+    arg="$1"
+    shift
+    case "${arg}" in
+      --model|-m)
+        CC_ROUTER_NORMALIZED_ARGS+=("${arg}")
+        if (($# > 0)); then
+          raw="$1"
+          shift
+          mapped="$(cc_router_map_model_alias "${raw}" "${opus_model}" "${sonnet_model}" "${haiku_model}")"
+          CC_ROUTER_NORMALIZED_ARGS+=("${mapped}")
+        fi
+        ;;
+      --model=*)
+        raw="${arg#--model=}"
+        mapped="$(cc_router_map_model_alias "${raw}" "${opus_model}" "${sonnet_model}" "${haiku_model}")"
+        CC_ROUTER_NORMALIZED_ARGS+=("--model=${mapped}")
+        ;;
+      -m=*)
+        raw="${arg#-m=}"
+        mapped="$(cc_router_map_model_alias "${raw}" "${opus_model}" "${sonnet_model}" "${haiku_model}")"
+        CC_ROUTER_NORMALIZED_ARGS+=("-m=${mapped}")
+        ;;
+      *)
+        CC_ROUTER_NORMALIZED_ARGS+=("${arg}")
+        ;;
+    esac
+  done
 }
 
 cc_router_run_claude() {
@@ -278,6 +433,10 @@ cc_router_run_official_claude() {
   (
     cc_router_unset_routing_env
     export CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1
+    cc_router_export_cache_prompt_env
+    if cc_router_cache_fix_enabled; then
+      export ANTHROPIC_BASE_URL="$(cc_router_cache_fix_url)"
+    fi
     cc_router_run_claude "$@"
   )
 }
@@ -289,10 +448,15 @@ cc_router_run_9router_claude() {
   local nr_haiku_model="$4"
   local nr_tool_search="$5"
   local nr_key="${6:-}"
+  local client_base
   shift 6
+  if declare -F cc_router_ensure_9router_stack_deps >/dev/null 2>&1; then
+    cc_router_ensure_9router_stack_deps || exit 1
+  fi
+  client_base="$(cc_router_ninerouter_client_base_url)"
   (
     cc_router_unset_routing_env
-    export ANTHROPIC_BASE_URL="${nr_base}/v1"
+    export ANTHROPIC_BASE_URL="${client_base}/v1"
     export ANTHROPIC_MODEL="${nr_sonnet_model}"
     export ANTHROPIC_DEFAULT_OPUS_MODEL="${nr_opus_model}"
     export ANTHROPIC_DEFAULT_SONNET_MODEL="${nr_sonnet_model}"
@@ -306,7 +470,9 @@ cc_router_run_9router_claude() {
     if [[ -n "${nr_key}" ]]; then
       export ANTHROPIC_AUTH_TOKEN="${nr_key}"
     fi
-    cc_router_run_claude "$@"
+    cc_router_export_cache_prompt_env
+    cc_router_normalize_model_args "${nr_opus_model}" "${nr_sonnet_model}" "${nr_haiku_model}" "$@"
+    cc_router_run_claude "${CC_ROUTER_NORMALIZED_ARGS[@]}"
   )
 }
 
@@ -406,6 +572,35 @@ cc_router_config_show() {
   echo "claudePermissionsTarget: ${target}"
   echo "  global file : $(cc_router_claude_global_settings_file)"
   echo "  project file: $(cc_router_claude_project_settings_file) (from git root or cwd)"
+  echo
+  if cc_router_cache_prompt_env_enabled; then
+    echo "cachePromptEnvEnabled (effective): enabled → ATTRIBUTION_HEADER=false, DISABLE_GIT_INSTRUCTIONS=1"
+  else
+    echo "cachePromptEnvEnabled (effective): disabled"
+  fi
+  if [[ -n "${CC_CACHE_PROMPT_ENV_ENABLED:-}" ]]; then
+    echo "  (overridden by CC_CACHE_PROMPT_ENV_ENABLED)"
+  fi
+  echo
+  if cc_router_cache_fix_enabled; then
+    echo "cacheFixEnabled (effective): enabled → official cc sets ANTHROPIC_BASE_URL=$(cc_router_cache_fix_url)"
+  else
+    echo "cacheFixEnabled (effective): disabled"
+  fi
+  if [[ -n "${CC_CACHE_FIX_ENABLED:-}" ]]; then
+    echo "  (overridden by CC_CACHE_FIX_ENABLED)"
+  fi
+  echo "cacheFixUrl (config): $(cc_router_config_get cacheFixUrl "http://127.0.0.1:9801")"
+  echo
+  if cc_router_cache_fix_9router_enabled; then
+    echo "cacheFix9routerEnabled (effective): enabled → cc -9 uses $(cc_router_cache_fix_url)/v1 → 9Router at $(cc_router_ninerouter_real_url)"
+  else
+    echo "cacheFix9routerEnabled (effective): disabled → cc -9 uses $(cc_router_ninerouter_real_url)/v1 directly"
+  fi
+  if [[ -n "${CC_CACHE_FIX_9ROUTER_ENABLED:-}" ]]; then
+    echo "  (overridden by CC_CACHE_FIX_9ROUTER_ENABLED)"
+  fi
+  echo "nineRouterUrl (config fallback): $(cc_router_config_get nineRouterUrl "http://127.0.0.1:20128")"
 }
 
 cc_router_config_help() {
@@ -419,6 +614,11 @@ Usage:
   cc config show
   cc config setup
   cc config set allowDangerouslySkipPermissions on|off
+  cc config set cachePromptEnvEnabled on|off
+  cc config set cacheFixEnabled on|off
+  cc config set cacheFixUrl http://127.0.0.1:9801
+  cc config set cacheFix9routerEnabled on|off
+  cc config set nineRouterUrl http://127.0.0.1:20128
   cc config set claudePermissionsTarget none|global|project
 
   cc config claude show [--global|--project]
@@ -531,6 +731,26 @@ cc_router_config_dispatch() {
           cc_router_config_set_bool "${key}" "${val}" || return $?
           echo "Set ${key}=$(cc_router_config_get "${key}" false)"
           ;;
+        cachePromptEnvEnabled)
+          cc_router_config_set_bool "${key}" "${val}" || return $?
+          echo "Set ${key}=$(cc_router_config_get "${key}" true)"
+          ;;
+        cacheFixEnabled)
+          cc_router_config_set_bool "${key}" "${val}" || return $?
+          echo "Set ${key}=$(cc_router_config_get "${key}" true)"
+          ;;
+        cacheFixUrl)
+          cc_router_config_set_string "${key}" "${val}"
+          echo "Set ${key}=$(cc_router_config_get "${key}" "")"
+          ;;
+        cacheFix9routerEnabled)
+          cc_router_config_set_bool "${key}" "${val}" || return $?
+          echo "Set ${key}=$(cc_router_config_get "${key}" true)"
+          ;;
+        nineRouterUrl)
+          cc_router_config_set_string "${key}" "${val}"
+          echo "Set ${key}=$(cc_router_config_get "${key}" "")"
+          ;;
         claudePermissionsTarget)
           case "${val}" in
             none | global | project) cc_router_config_set_string "${key}" "${val}" ;;
@@ -543,7 +763,7 @@ cc_router_config_dispatch() {
           ;;
         *)
           echo "Unknown key: ${key}" >&2
-          echo "Supported: allowDangerouslySkipPermissions, claudePermissionsTarget" >&2
+          echo "Supported: allowDangerouslySkipPermissions, cachePromptEnvEnabled, cacheFixEnabled, cacheFixUrl, cacheFix9routerEnabled, nineRouterUrl, claudePermissionsTarget" >&2
           return 2
           ;;
       esac

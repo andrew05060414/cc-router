@@ -25,6 +25,16 @@ if [[ "${_cc_lib_loaded}" -ne 1 ]]; then
   exit 1
 fi
 
+_cc_setup_loaded=0
+for _cc_setup in "${_cc_script_dir}/lib/cc-setup.sh" "${HOME}/.local/share/cc-router/lib/cc-setup.sh"; do
+  if [[ -f "${_cc_setup}" ]]; then
+    # shellcheck source=/dev/null
+    source "${_cc_setup}"
+    _cc_setup_loaded=1
+    break
+  fi
+done
+
 show_help() {
   cat <<'EOF'
 cc - Start Claude Code in official mode (clean env)
@@ -33,9 +43,13 @@ Usage:
   cc [claude args...]
   cc -9 [claude args...]
   cc resume [claude args...]
+  cc setup [check|install-deps|start-cache-fix|intro]
   cc doctor [detail|-v|--verbose]
   cc config [show|setup|set|claude ...]
   cc --help
+
+First-time stack (9Router + cache-fix):  cc setup
+Full guide: docs/SETUP-GUIDE.md (see also: cc setup check)
 
 Config (~/.config/cc-router/config.json):
   cc config setup
@@ -52,6 +66,16 @@ fi
 if [[ "${1:-}" == "config" ]]; then
   shift
   cc_router_config_dispatch "$@"
+  exit $?
+fi
+
+if [[ "${1:-}" == "setup" ]]; then
+  if [[ "${_cc_setup_loaded}" -ne 1 ]]; then
+    echo "cc-router: lib/cc-setup.sh not found (re-run ./install.sh)" >&2
+    exit 1
+  fi
+  shift
+  cc_setup_dispatch "$@"
   exit $?
 fi
 
@@ -168,26 +192,67 @@ if [[ "${1:-}" == "doctor" ]]; then
     echo "INFO: allowDangerouslySkipPermissions disabled (run: cc config setup)"
   fi
   echo "INFO: cc-router config at $(cc_router_config_file)"
+  if cc_router_cache_prompt_env_enabled; then
+    echo "OK: cachePromptEnvEnabled → ATTRIBUTION_HEADER=false, DISABLE_GIT_INSTRUCTIONS=1 on launch"
+  else
+    echo "INFO: cachePromptEnvEnabled=false (enable: cc config set cachePromptEnvEnabled on)"
+  fi
   echo
 
-  if [[ "${routing_mode}" == "9router" ]]; then
-    if [[ -n "${NINEROUTER_URL:-}" ]]; then
-      nr_base="${NINEROUTER_URL%/}"
-      echo "OK: NINEROUTER_URL=${nr_base}"
-      echo "Hint: health check -> ${nr_base}/api/health"
-      if health_resp="$(curl -fsS --max-time 5 "${nr_base}/api/health" 2>/dev/null)"; then
-        if [[ "${health_resp}" == *'"ok":true'* || "${health_resp}" == *'"ok": true'* ]]; then
-          echo "OK: 9Router health check returned ok=true"
-        else
-          echo "WARN: 9Router health check responded but ok!=true"
-        fi
+  if [[ "${routing_mode}" != "9router" ]]; then
+    if cc_router_cache_fix_enabled; then
+      cf_url="$(cc_router_cache_fix_url)"
+      echo "INFO: cacheFixEnabled → official cc sets ANTHROPIC_BASE_URL=${cf_url}"
+      if cc_router_probe_cache_fix_health "${cf_url}"; then
+        echo "OK: cache-fix health ${cf_url}/health"
       else
-        echo "WARN: failed to reach ${nr_base}/api/health"
+        issues=1
+        echo "WARN: cacheFixEnabled but ${cf_url}/health failed"
+        echo "Fix: cc setup install-deps && cc setup start-cache-fix"
+      fi
+    else
+      echo "INFO: cacheFixEnabled=false (official cc uses Anthropic directly; enable: cc config set cacheFixEnabled on)"
+    fi
+    echo
+  fi
+
+  if [[ "${routing_mode}" == "9router" ]]; then
+    nr_real="$(cc_router_ninerouter_real_url)"
+    nr_client="$(cc_router_ninerouter_client_base_url)"
+    if [[ -n "${NINEROUTER_URL:-}" ]]; then
+      echo "OK: NINEROUTER_URL=${NINEROUTER_URL%/} (9Router upstream)"
+    else
+      echo "INFO: NINEROUTER_URL unset; using nineRouterUrl from config: ${nr_real}"
+    fi
+    echo "Hint: 9Router health -> ${nr_real}/api/health"
+    if health_resp="$(curl -fsS --max-time 5 "${nr_real}/api/health" 2>/dev/null)"; then
+      if [[ "${health_resp}" == *'"ok":true'* || "${health_resp}" == *'"ok": true'* ]]; then
+        echo "OK: 9Router health check returned ok=true"
+      else
+        echo "WARN: 9Router health check responded but ok!=true"
       fi
     else
       issues=1
-      echo "FAIL: NINEROUTER_URL is required for cc -9 mode"
-      echo "Fix: export NINEROUTER_URL=\"http://localhost:20128\""
+      echo "WARN: failed to reach ${nr_real}/api/health"
+    fi
+    if cc_router_cache_fix_9router_enabled; then
+      cf_url="$(cc_router_cache_fix_url)"
+      echo "OK: cacheFix9routerEnabled → cc -9 ANTHROPIC_BASE_URL=${cf_url}/v1 (via cache-fix)"
+      if cc_router_probe_cache_fix_health "${cf_url}"; then
+        echo "OK: cache-fix health ${cf_url}/health"
+      else
+        issues=1
+        echo "WARN: cache-fix not reachable at ${cf_url}/health"
+        if ! declare -F cc_setup_pkg_cache_fix_present >/dev/null 2>&1 || ! cc_setup_pkg_cache_fix_present; then
+          echo "Fix: cc setup install-deps   (npm: claude-code-cache-fix)"
+        fi
+        echo "Fix: cc setup start-cache-fix   (or see below)"
+        if declare -F cc_router_print_cache_fix_start_hint >/dev/null 2>&1; then
+          cc_router_print_cache_fix_start_hint | sed 's/^/  /'
+        fi
+      fi
+    else
+      echo "INFO: cacheFix9routerEnabled=false → cc -9 talks directly to ${nr_real}/v1"
     fi
     if [[ -n "${NINEROUTER_KEY:-}" ]]; then
       echo "OK: NINEROUTER_KEY detected"
@@ -210,6 +275,7 @@ if [[ "${1:-}" == "doctor" ]]; then
           ;;
       esac
     done
+    echo "OK: agent slot alias rewrite active (explicit --model sonnet|haiku|opus maps to current 9Router slot targets)"
 
     settings_path="${HOME}/.claude/settings.json"
     if [[ -f "${settings_path}" ]]; then
@@ -253,12 +319,40 @@ if [[ "${1:-}" == "doctor" ]]; then
     done
 
     echo
-    echo "[4] Effective env that 'cc -9' would inject"
-    sim_base="${NINEROUTER_URL:-}"
-    if [[ -n "${sim_base}" ]]; then
-      sim_base="${sim_base%/}/v1"
+    echo "[4] Prompt cache env (cc / cc -9 / ccd on launch)"
+    if cc_router_cache_prompt_env_enabled; then
+      attr_sim="${CC_ATTRIBUTION_HEADER-false}"
+      git_sim="${CC_DISABLE_GIT_INSTRUCTIONS-1}"
+      printf '  %-42s= %s\n' "CLAUDE_CODE_ATTRIBUTION_HEADER" "${attr_sim}"
+      if [[ -n "${git_sim}" ]]; then
+        printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS" "${git_sim}"
+      else
+        printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS" "<unset>"
+      fi
     else
-      sim_base="<NINEROUTER_URL missing>"
+      echo "  (cachePromptEnvEnabled=false — not injected)"
+    fi
+
+    if [[ "${routing_mode}" != "9router" ]]; then
+      echo
+      echo "[4b] Official cc effective routing (cache-fix)"
+      if cc_router_cache_fix_enabled; then
+        printf '  %-42s= %s\n' "ANTHROPIC_BASE_URL" "$(cc_router_cache_fix_url)  (cacheFixEnabled)"
+        printf '  %-42s= %s\n' "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" "1"
+      else
+        printf '  %-42s= %s\n' "ANTHROPIC_BASE_URL" "<unset>  (direct Anthropic)"
+        printf '  %-42s= %s\n' "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" "1"
+      fi
+    fi
+
+    echo
+    echo "[5] Effective env that 'cc -9' would inject"
+    sim_base="$(cc_router_ninerouter_client_base_url)/v1"
+    sim_real="$(cc_router_ninerouter_real_url)"
+    if cc_router_cache_fix_9router_enabled; then
+      echo "  chain: Claude Code → cache-fix ($(cc_router_cache_fix_url)) → 9Router (${sim_real})"
+    else
+      echo "  chain: Claude Code → 9Router (${sim_real}) direct"
     fi
     sim_opus="${NINEROUTER_OPUS_MODEL:-cc-pro}"
     sim_sonnet="${NINEROUTER_SONNET_MODEL:-cc-normal}"
@@ -276,6 +370,7 @@ if [[ "${1:-}" == "doctor" ]]; then
     printf '  %-42s= %s\n' "ANTHROPIC_DEFAULT_SONNET_MODEL"           "${sim_sonnet}"
     printf '  %-42s= %s\n' "ANTHROPIC_DEFAULT_HAIKU_MODEL"            "${sim_haiku}"
     printf '  %-42s= %s\n' "CLAUDE_CODE_SUBAGENT_MODEL"               "${sim_haiku}"
+    echo "  agent slot alias rewrite active         = sonnet->${sim_sonnet}, haiku->${sim_haiku}, opus->${sim_opus}"
     printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "1"
     printf '  %-42s= %s\n' "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK" "1"
     printf '  %-42s= %s\n' "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"     "<unset>"
@@ -290,7 +385,7 @@ if [[ "${1:-}" == "doctor" ]]; then
     fi
 
     echo
-    echo "[5] ~/.claude/settings.json check"
+    echo "[6] ~/.claude/settings.json check"
     settings_path="${HOME}/.claude/settings.json"
     echo "  path              : ${settings_path}"
     if [[ -f "${settings_path}" ]]; then
@@ -319,7 +414,7 @@ if [[ "${1:-}" == "doctor" ]]; then
     fi
 
     echo
-    echo "[6] Shell startup files (does cc come from here?)"
+    echo "[7] Shell startup files (does cc come from here?)"
     for f in "${HOME}/.bashrc" "${HOME}/.bash_profile" "${HOME}/.profile" "${HOME}/.zshrc"; do
       if [[ -f "${f}" ]]; then
         if grep -Eq '(^|[[:space:]])cc[[:space:]]*\(\)|alias[[:space:]]+cc=|function[[:space:]]+cc' "${f}" 2>/dev/null; then
@@ -333,7 +428,7 @@ if [[ "${1:-}" == "doctor" ]]; then
     done
 
     echo
-    echo "[7] Common things to check if context bloats"
+    echo "[8] Common things to check if context bloats"
     echo "  - Restart ALL Claude Code windows after editing scripts/env. Running processes hold a snapshot."
     echo "  - Confirm 'cc' resolves to your installed cc-router script (see [1])."
     echo "  - Confirm ENABLE_TOOL_SEARCH is 'true' in section [4] (this is what keeps MCP tools deferred)."
@@ -341,7 +436,7 @@ if [[ "${1:-}" == "doctor" ]]; then
     echo "  - If MCP tools list is huge, disable unused MCP servers via 'claude mcp list' / 'claude mcp remove <name>'."
     echo "  - Inside Claude Code: '/context' should show a 'System tools' bucket. If absent, ENABLE_TOOL_SEARCH may have been stripped by 9Router."
     echo
-    echo "[8] Quick A/B"
+    echo "[9] Quick A/B"
     echo "  Window 1:  cc      -> /context  (official baseline)"
     echo "  Window 2:  cc -9   -> /context  (compare buckets)"
     echo "  Healthy diff: similar System tools (~6-10k), Messages < 6k, total < 30k after 'hi'."
@@ -367,11 +462,11 @@ if [[ "${1:-}" == "resume" ]]; then
 fi
 
 if [[ "${routing_mode}" == "9router" ]]; then
-  if [[ -z "${NINEROUTER_URL:-}" ]]; then
-    echo "NINEROUTER_URL is required for cc -9 mode. Example: export NINEROUTER_URL=\"http://localhost:20128\"" >&2
+  nr_base="$(cc_router_ninerouter_real_url)"
+  if [[ -z "${nr_base}" ]]; then
+    echo "9Router URL is required for cc -9. Set NINEROUTER_URL or cc config set nineRouterUrl http://127.0.0.1:20128" >&2
     exit 1
   fi
-  nr_base="${NINEROUTER_URL%/}"
   # Model names exposed to Claude Code as the three default-slot aliases.
   # Custom names like 'cc-pro/cc-normal/cc-lite' DO route through 9Router fine;
   # the only side effect is that the client falls back to unknown-model defaults
