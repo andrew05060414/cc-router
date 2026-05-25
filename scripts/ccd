@@ -484,6 +484,7 @@ ccd_tool_search="${CCD_TOOL_SEARCH-true}"
 if [[ -n "${ccd_tool_search}" ]]; then
   export ENABLE_TOOL_SEARCH="${ccd_tool_search}"
 fi
+cc_router_export_cache_prompt_env
 if [[ "${autocompact_pct}" != "0" ]]; then
   export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="${autocompact_pct}"
 fi
