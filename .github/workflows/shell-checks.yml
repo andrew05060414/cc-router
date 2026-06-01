@@ -1,0 +1,26 @@
+name: Shell Checks
+
+on:
+  push:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/**'
+      - 'README.md'
+      - 'docs/**'
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/**'
+      - 'README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  shell-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run shell regression suite
+        run: bash scripts/test.sh

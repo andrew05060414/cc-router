@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_cc_script_path="${BASH_SOURCE[0]}"
+while [[ -L "${_cc_script_path}" ]]; do
+  _cc_link="$(readlink "${_cc_script_path}")"
+  if [[ "${_cc_link}" = /* ]]; then
+    _cc_script_path="${_cc_link}"
+  else
+    _cc_script_path="$(cd "$(dirname "${_cc_script_path}")" && pwd)/${_cc_link}"
+  fi
+done
+_cc_script_dir="$(cd "$(dirname "${_cc_script_path}")" && pwd)"
+_cc_lib_loaded=0
+for _cc_lib in "${_cc_script_dir}/lib/cc-common.sh" "${HOME}/.local/share/cc-router/lib/cc-common.sh"; do
+  if [[ -f "${_cc_lib}" ]]; then
+    # shellcheck source=/dev/null
+    source "${_cc_lib}"
+    _cc_lib_loaded=1
+    break
+  fi
+done
+if [[ "${_cc_lib_loaded}" -ne 1 ]]; then
+  echo "cc-router: lib/cc-common.sh not found (re-run ./install.sh)" >&2
+  exit 1
+fi
+
 model='deepseek-v4-pro[1m]'
 haiku_model='deepseek-v4-flash'
 max_output='65536'
@@ -460,8 +484,9 @@ ccd_tool_search="${CCD_TOOL_SEARCH-true}"
 if [[ -n "${ccd_tool_search}" ]]; then
   export ENABLE_TOOL_SEARCH="${ccd_tool_search}"
 fi
+cc_router_export_cache_prompt_env
 if [[ "${autocompact_pct}" != "0" ]]; then
   export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="${autocompact_pct}"
 fi
 
-exec claude "${args[@]}"
+cc_router_exec_claude "${args[@]}"

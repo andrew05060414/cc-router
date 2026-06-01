@@ -1,5 +1,8 @@
 # cc-router Setup Notes & Known Issues
 
+**New to the full stack (9Router + OAuth + cache-fix)?** Start with
+[SETUP-GUIDE.md](SETUP-GUIDE.md), then run `cc setup check`.
+
 This file collects setup quirks, gotchas, and root-cause notes that don't
 belong in the main README. Read this if `cc -9` / `ccd` behaves strangely,
 if `/context` shows unexpected token usage, or if you're debugging a
@@ -308,7 +311,101 @@ wrapper own provider routing entirely.
 
 ---
 
-## 7. Quick Diagnosis Cheat Sheet
+## 7. Prompt cache env (all launch modes)
+
+cc-router sets on every `cc`, `cc -9`, and `ccd` launch:
+
+```text
+CLAUDE_CODE_ATTRIBUTION_HEADER=false
+CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1
+```
+
+**Why:**
+
+- **Attribution header** — Anthropic billing attribution on third-party /
+  proxied endpoints can invalidate or bypass provider prompt caches.
+- **Git instructions** — injecting `git status` into the system prompt changes
+  the prefix every time the working tree moves, so prefix cache misses.
+
+Optional one-shot overrides (same pattern as `NINEROUTER_TOOL_SEARCH`):
+
+```bash
+export CC_ATTRIBUTION_HEADER=false          # default when unset
+export CC_DISABLE_GIT_INSTRUCTIONS=1        # default when unset; empty string unsets
+```
+
+Verify DeepSeek cache hits at home: [`CCD-CACHE-BENCH.md`](CCD-CACHE-BENCH.md)
+and `scripts/ccd-cache-bench.sh`.
+
+---
+
+## 8. claude-code-cache-fix (default on for `cc` and `cc -9`)
+
+[claude-code-cache-fix](https://github.com/cnighswonger/claude-code-cache-fix)
+is a local proxy that stabilizes Claude Code request prefixes (billing header,
+resume block layout, tool order, etc.) so **prompt cache** hits stay high.
+
+cc-router enables it by default (`cacheFixEnabled`, `cacheFix9routerEnabled`).
+Turn off with `cc config set cacheFix9routerEnabled off` (or `cacheFixEnabled off`
+for official mode only).
+
+### Install and start (one-time)
+
+```bash
+npm install -g claude-code-cache-fix
+```
+
+**For `cc -9` (OAuth / model switching via 9Router)** — upstream must be 9Router:
+
+```bash
+export CACHE_FIX_PROXY_UPSTREAM=http://127.0.0.1:20128   # or your NINEROUTER_URL
+node "$(npm root -g)/claude-code-cache-fix/proxy/server.mjs" &
+curl http://127.0.0.1:9801/health
+```
+
+**For official `cc` only** — upstream defaults to `https://api.anthropic.com`; same
+listen on `:9801`, no `CACHE_FIX_PROXY_UPSTREAM` needed unless you chain elsewhere.
+
+`cc -9 doctor` prints the exact start command when cache-fix health fails.
+
+### What cc-router sets
+
+| Mode | `cacheFix*` config | `ANTHROPIC_BASE_URL` | cache-fix upstream |
+|------|-------------------|----------------------|--------------------|
+| `cc` | `cacheFixEnabled` (default on) | `http://127.0.0.1:9801` (no `/v1`) | Anthropic API |
+| `cc -9` | `cacheFix9routerEnabled` (default on) | `http://127.0.0.1:9801/v1` | `nineRouterUrl` or `NINEROUTER_URL` |
+
+Chain for `cc -9`:
+
+```text
+Claude Code → cache-fix (:9801) → 9Router (:20128) → provider (OAuth Claude, etc.)
+```
+
+`NINEROUTER_KEY` is still passed as `ANTHROPIC_AUTH_TOKEN` to authenticate to
+9Router. OAuth accounts are configured in the 9Router dashboard, not in cc-router.
+
+### Config toggles
+
+```bash
+cc config show
+cc config set cachePromptEnvEnabled off    # stop ATTRIBUTION_HEADER / git env injection
+cc config set cacheFix9routerEnabled off   # cc -9 direct to 9Router (no cache-fix)
+cc config set cacheFixEnabled off            # official cc direct to Anthropic
+cc config set nineRouterUrl http://127.0.0.1:20128
+```
+
+Env overrides: `CC_CACHE_FIX_9ROUTER_ENABLED`, `CC_CACHE_FIX_ENABLED`,
+`CC_CACHE_PROMPT_ENV_ENABLED`, `CC_CACHE_FIX_URL`.
+
+### Existing `config.json`
+
+New installs and `cc config setup` use defaults **on**. If your file still has
+`"cacheFixEnabled": false` from an older example, run `cc config set cacheFixEnabled on`
+and `cc config set cacheFix9routerEnabled on`, or merge from `config.example.json`.
+
+---
+
+## 9. Quick Diagnosis Cheat Sheet
 
 | Symptom | Most likely cause | First thing to try |
 |---|---|---|
@@ -322,7 +419,7 @@ wrapper own provider routing entirely.
 
 ---
 
-## 8. Where to Get Help
+## 10. Where to Get Help
 
 - Run `cc -9 doctor detail` first - it covers ~80% of common
   misconfigurations and prints copy-paste fixes.

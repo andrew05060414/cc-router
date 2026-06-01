@@ -11,8 +11,13 @@ Usage:
   cc [claude args...]
   cc -9 [claude args...]
   cc resume [claude args...]
+  cc setup [check]
   cc doctor [detail|-v|--verbose]
+  cc config [show|setup|set|claude ...]
   cc --help
+
+First-time (9Router + cache-fix): cc setup check
+Guide: docs/SETUP-GUIDE.md
 
 Examples:
   cc
@@ -35,22 +40,67 @@ function Invoke-OfficialClaude {
     Initialize-ClaudeCodePowerShellToolEnv $bak
     # Ignore provider routing keys in settings files; route by wrapper env only.
     $env:CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1'
-    & claude @ClaudeArgs
+    Set-CcRouterCachePromptEnv
+    if (Test-CcRouterCacheFixEnabled) {
+      $env:ANTHROPIC_BASE_URL = (Get-CcRouterCacheFixUrl)
+    }
+    Invoke-CcRouterClaude @ClaudeArgs
   } finally {
     Restore-CCDSProcessEnv $bak
   }
 }
 
+function Test-CcSetupPackagePresent {
+  param([string]$PackageFolderName)
+  try {
+    $root = npm root -g 2>$null
+    if (-not $root) { return $false }
+    return Test-Path -LiteralPath (Join-Path $root $PackageFolderName)
+  } catch {
+    return $false
+  }
+}
+
+function Invoke-CcSetupOfferInstallDeps {
+  if ($env:CC_ROUTER_NO_INSTALL_PROMPT -eq '1') {
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $false }
+    if ((Test-CcRouterCacheFix9routerEnabled) -and -not (Test-CcSetupPackagePresent 'claude-code-cache-fix')) { return $false }
+    return $true
+  }
+  $missing = @()
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    $missing += '@anthropic-ai/claude-code'
+  }
+  if ((Test-CcRouterCacheFix9routerEnabled) -and -not (Test-CcSetupPackagePresent 'claude-code-cache-fix')) {
+    $missing += 'claude-code-cache-fix'
+  }
+  if ($missing.Count -eq 0) { return $true }
+  Write-Host ''
+  Write-Host 'cc -9 needs (npm install -g):' -ForegroundColor Yellow
+  $missing | ForEach-Object { Write-Host "  • $_" }
+  Write-Host '9Router is separate — start it at your nineRouterUrl (not npm).'
+  Write-Host ''
+  $ans = Read-Host 'Install now? [y/N]'
+  if ($ans -notmatch '^(y|yes)$') {
+    Write-Host 'Skipped. Run: cc setup install-deps' -ForegroundColor Yellow
+    return $false
+  }
+  foreach ($pkg in $missing) {
+    Write-Host "→ npm install -g $pkg"
+    npm install -g $pkg
+    if ($LASTEXITCODE -ne 0) { return $false }
+  }
+  return $true
+}
+
 function Invoke-NineRouterClaude {
   param([string[]]$ClaudeArgs)
+  if (-not (Invoke-CcSetupOfferInstallDeps)) { exit 1 }
   Assert-ClaudeCodeInstalled
-  $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Process')
-  if (-not $base) { $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'User') }
-  if (-not $base) { $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Machine') }
-  if (-not $base) {
-    throw "Set NINEROUTER_URL before running cc -9. Example: `$env:NINEROUTER_URL = 'http://localhost:20128'"
+  $clientBase = Get-CcRouterNineRouterClientBaseUrl
+  if (-not $clientBase) {
+    throw '9Router URL missing. Set NINEROUTER_URL or: cc config set nineRouterUrl http://127.0.0.1:20128'
   }
-  $base = $base.TrimEnd('/')
   $token = [Environment]::GetEnvironmentVariable('NINEROUTER_KEY', 'Process')
   if (-not $token) { $token = [Environment]::GetEnvironmentVariable('NINEROUTER_KEY', 'User') }
   if (-not $token) { $token = [Environment]::GetEnvironmentVariable('NINEROUTER_KEY', 'Machine') }
@@ -83,7 +133,7 @@ function Invoke-NineRouterClaude {
     # message (messages bucket bloats by ~30k+, no 'System tools' bucket shows
     # up in /context). ccd also does not set it. Settings.json env block is
     # checked by `cc -9 doctor` instead.
-    $env:ANTHROPIC_BASE_URL = "$base/v1"
+    $env:ANTHROPIC_BASE_URL = "$clientBase/v1"
     $env:ANTHROPIC_MODEL = $sonnetModel
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = $opusModel
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnetModel
@@ -112,7 +162,9 @@ function Invoke-NineRouterClaude {
     if ($token) {
       $env:ANTHROPIC_AUTH_TOKEN = $token
     }
-    & claude @ClaudeArgs
+    Set-CcRouterCachePromptEnv
+    $normalizedArgs = Normalize-CcRouterModelArgs -ClaudeArgs $ClaudeArgs -OpusModel $opusModel -SonnetModel $sonnetModel -HaikuModel $haikuModel
+    Invoke-CcRouterClaude @normalizedArgs
   } finally {
     Clear-CCDSEnv
     Restore-CCDSProcessEnv $bak
@@ -168,27 +220,62 @@ function Show-Doctor {
     Write-Host "OK: process ANTHROPIC_BASE_URL not set." -ForegroundColor Green
   }
 
-  if ($NineRouter) {
-    $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Process')
-    if (-not $base) { $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'User') }
-    if (-not $base) { $base = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Machine') }
-    if ($base) {
-      $base = $base.TrimEnd('/')
-      Write-Host "OK: NINEROUTER_URL -> $base" -ForegroundColor Green
-      Write-Host "Hint: health check endpoint is $base/api/health"
-      try {
-        $resp = Invoke-RestMethod -Uri "$base/api/health" -Method Get -TimeoutSec 5
-        if ($resp.ok -eq $true) {
-          Write-Host "OK: 9Router health check returned ok=true" -ForegroundColor Green
-        } else {
-          Write-Host "WARN: 9Router health check responded but ok!=true" -ForegroundColor Yellow
-        }
-      } catch {
-        Write-Host "WARN: failed to reach $base/api/health ($($_.Exception.Message))" -ForegroundColor Yellow
+  if (Test-CcRouterCachePromptEnvEnabled) {
+    Write-Host 'OK: cachePromptEnvEnabled → ATTRIBUTION_HEADER=false, DISABLE_GIT_INSTRUCTIONS=1 on launch' -ForegroundColor Green
+  } else {
+    Write-Host 'INFO: cachePromptEnvEnabled=false (enable: cc config set cachePromptEnvEnabled on)'
+  }
+
+  if (-not $NineRouter) {
+    if (Test-CcRouterCacheFixEnabled) {
+      $cfUrl = Get-CcRouterCacheFixUrl
+      Write-Host "INFO: cacheFixEnabled → official cc sets ANTHROPIC_BASE_URL=$cfUrl"
+      if (Test-CcRouterCacheFixHealth $cfUrl) {
+        Write-Host "OK: cache-fix health $cfUrl/health" -ForegroundColor Green
+      } else {
+        Write-Host "WARN: cacheFixEnabled but $cfUrl/health failed (start claude-code-cache-fix proxy?)" -ForegroundColor Yellow
+        Write-Host 'Fix: see docs/SETUP-NOTES.md (claude-code-cache-fix section)'
       }
     } else {
-      Write-Host "Missing: NINEROUTER_URL (required for cc -9 mode)" -ForegroundColor Yellow
-      Write-Host "Fix: `$env:NINEROUTER_URL = 'http://localhost:20128'"
+      Write-Host 'INFO: cacheFixEnabled=false (enable: cc config set cacheFixEnabled on)'
+    }
+    Write-Host ''
+  }
+
+  if ($NineRouter) {
+    $nrReal = Get-CcRouterNineRouterRealUrl
+    $nrClient = Get-CcRouterNineRouterClientBaseUrl
+    $envUrl = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Process')
+    if (-not $envUrl) { $envUrl = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'User') }
+    if (-not $envUrl) { $envUrl = [Environment]::GetEnvironmentVariable('NINEROUTER_URL', 'Machine') }
+    if ($envUrl) {
+      Write-Host "OK: NINEROUTER_URL -> $($envUrl.TrimEnd('/')) (9Router upstream)" -ForegroundColor Green
+    } else {
+      Write-Host "INFO: NINEROUTER_URL unset; nineRouterUrl from config -> $nrReal" -ForegroundColor Cyan
+    }
+    Write-Host "Hint: 9Router health -> $nrReal/api/health"
+    try {
+      $resp = Invoke-RestMethod -Uri "$nrReal/api/health" -Method Get -TimeoutSec 5
+      if ($resp.ok -eq $true) {
+        Write-Host 'OK: 9Router health check returned ok=true' -ForegroundColor Green
+      } else {
+        Write-Host 'WARN: 9Router health check responded but ok!=true' -ForegroundColor Yellow
+      }
+    } catch {
+      Write-Host "WARN: failed to reach $nrReal/api/health ($($_.Exception.Message))" -ForegroundColor Yellow
+    }
+    if (Test-CcRouterCacheFix9routerEnabled) {
+      $cfUrl = Get-CcRouterCacheFixUrl
+      Write-Host "OK: cacheFix9routerEnabled -> cc -9 ANTHROPIC_BASE_URL=$cfUrl/v1 (via cache-fix)" -ForegroundColor Green
+      if (Test-CcRouterCacheFixHealth $cfUrl) {
+        Write-Host "OK: cache-fix health $cfUrl/health" -ForegroundColor Green
+      } else {
+        Write-Host "WARN: cache-fix not reachable at $cfUrl/health" -ForegroundColor Yellow
+        Write-Host 'Fix: install claude-code-cache-fix and start with upstream at 9Router:'
+        Write-CcRouterCacheFixStartHint
+      }
+    } else {
+      Write-Host "INFO: cacheFix9routerEnabled=false -> cc -9 uses $nrReal/v1 directly"
     }
 
     $token = [Environment]::GetEnvironmentVariable('NINEROUTER_KEY', 'Process')
@@ -211,6 +298,7 @@ function Show-Doctor {
         Write-Host ("INFO: {0,-6} -> {1}  (custom name; client uses unknown-model defaults -- context unaffected)" -f $pair[0], $pair[1]) -ForegroundColor Cyan
       }
     }
+    Write-Host 'OK: agent slot alias rewrite active (explicit --model sonnet|haiku|opus maps to current 9Router slot targets)' -ForegroundColor Green
 
     $settingsPath = Join-Path $HOME ".claude\settings.json"
     if (Test-Path $settingsPath) {
@@ -271,9 +359,23 @@ function Show-Doctor {
     }
 
     Write-Host ""
-    Write-Host "[4] Effective env that 'cc -9' would inject" -ForegroundColor Cyan
-    $simBase = Get-FirstNonEmptyEnv 'NINEROUTER_URL'
-    if ($simBase) { $simBase = $simBase.TrimEnd('/') + '/v1' } else { $simBase = '<NINEROUTER_URL missing>' }
+    Write-Host "[4] Prompt cache env (cc / cc -9 / ccd on launch)" -ForegroundColor Cyan
+    if (Test-CcRouterCachePromptEnvEnabled) {
+      Write-Host '  CLAUDE_CODE_ATTRIBUTION_HEADER              = false'
+      Write-Host '  CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS       = 1'
+    } else {
+      Write-Host '  (cachePromptEnvEnabled=false — not injected)'
+    }
+
+    Write-Host ""
+    Write-Host "[5] Effective env that 'cc -9' would inject" -ForegroundColor Cyan
+    $simReal = Get-CcRouterNineRouterRealUrl
+    $simBase = (Get-CcRouterNineRouterClientBaseUrl).TrimEnd('/') + '/v1'
+    if (Test-CcRouterCacheFix9routerEnabled) {
+      Write-Host ("  chain: Claude Code -> cache-fix ($(Get-CcRouterCacheFixUrl)) -> 9Router ($simReal)")
+    } else {
+      Write-Host "  chain: Claude Code -> 9Router ($simReal) direct"
+    }
     $simOpus   = Get-FirstNonEmptyEnv 'NINEROUTER_OPUS_MODEL'   ; if (-not $simOpus)   { $simOpus   = 'cc-pro'    }
     $simSonnet = Get-FirstNonEmptyEnv 'NINEROUTER_SONNET_MODEL' ; if (-not $simSonnet) { $simSonnet = 'cc-normal' }
     $simHaiku  = Get-FirstNonEmptyEnv 'NINEROUTER_HAIKU_MODEL'  ; if (-not $simHaiku)  { $simHaiku  = 'cc-lite'   }
@@ -286,6 +388,7 @@ function Show-Doctor {
     Write-Host ("  ANTHROPIC_DEFAULT_SONNET_MODEL           = {0}" -f $simSonnet)
     Write-Host ("  ANTHROPIC_DEFAULT_HAIKU_MODEL            = {0}" -f $simHaiku)
     Write-Host ("  CLAUDE_CODE_SUBAGENT_MODEL               = {0}" -f $simHaiku)
+    Write-Host ("  agent slot alias rewrite active         = sonnet->{0}, haiku->{1}, opus->{2}" -f $simSonnet, $simHaiku, $simOpus)
     Write-Host ("  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = 1")
     Write-Host ("  CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK= 1")
     Write-Host ("  CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST     = <unset>")
@@ -398,6 +501,56 @@ if ($cmd -eq 'doctor') {
     }
   }
   Show-Doctor -NineRouter:$nineRouterMode -Detail:$detailMode
+  exit 0
+}
+
+if ($cmd -eq 'config') {
+  $configArgs = @()
+  if ($effectiveArgs.Count -gt 1) {
+    $configArgs = $effectiveArgs[1..($effectiveArgs.Count - 1)]
+  }
+  if (Get-Command Invoke-CcRouterConfigCommand -ErrorAction SilentlyContinue) {
+    Invoke-CcRouterConfigCommand $configArgs
+  } else {
+    throw 'cc-config.ps1 not found. Re-run install.ps1 from cc-router.'
+  }
+  exit 0
+}
+
+if ($cmd -eq 'setup') {
+  $sub = if ($effectiveArgs.Count -gt 1) { $effectiveArgs[1] } else { '' }
+  Write-Host '== cc setup ==' -ForegroundColor Cyan
+  Write-Host ''
+  Write-Host 'Stack (default cc -9): Claude Code -> cache-fix :9801 -> 9Router :20128 -> providers'
+  Write-Host 'Full guide: docs/SETUP-GUIDE.md or ~/.local/share/cc-router/docs/SETUP-GUIDE.md'
+  Write-Host ''
+  if ($sub -eq 'check' -or $sub -eq '') {
+    $issues = 0
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+      Write-Host 'FAIL: claude CLI not found' -ForegroundColor Red
+      $issues = 1
+    } else { Write-Host 'OK: claude CLI' -ForegroundColor Green }
+    $nr = Get-CcRouterNineRouterRealUrl
+    try {
+      $r = Invoke-RestMethod -Uri "$nr/api/health" -TimeoutSec 5
+      if ($r.ok -eq $true) { Write-Host "OK: $nr/api/health" -ForegroundColor Green }
+      else { Write-Host "WARN: $nr/api/health ok!=true" -ForegroundColor Yellow; $issues = 1 }
+    } catch {
+      Write-Host "FAIL: $nr/api/health ($($_.Exception.Message))" -ForegroundColor Red
+      $issues = 1
+    }
+    $cf = Get-CcRouterCacheFixUrl
+    if (Test-CcRouterCacheFix9routerEnabled -or (Test-CcRouterCacheFixEnabled)) {
+      if (Test-CcRouterCacheFixHealth $cf) { Write-Host "OK: $cf/health" -ForegroundColor Green }
+      else {
+        Write-Host "FAIL: cache-fix not on $cf" -ForegroundColor Red
+        Write-CcRouterCacheFixStartHint
+        $issues = 1
+      }
+    }
+    if ($issues -eq 0) { Write-Host ''; Write-Host 'Result: ready — cc -9' -ForegroundColor Green }
+    else { Write-Host ''; Write-Host 'Result: fix items above' -ForegroundColor Yellow }
+  }
   exit 0
 }
 

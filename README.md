@@ -1,15 +1,20 @@
 # cc-router
 
-Lightweight cross-platform launcher for Claude Code:
+Lightweight cross-platform quick launcher for Claude Code:
 
-- `cc` = official Claude mode (cleans DeepSeek routing env vars)
-- `cc -9` = 9Router mode (maps to OpenAI-compatible 9Router gateway)
-- `ccd` = DeepSeek mode (sets Anthropic-compatible DeepSeek env vars)
+- `cc` = the default way to boot Claude Code, with sane defaults
+- `cc -*` = optional variants for routing / setup / advanced modes
 
-> **Hitting weird `/context` bloat, model name issues, or PowerShell profile
-> quirks?** See [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md) — it documents
-> known gotchas (especially the Claude Code 2.1.70 MCP tool schema bloat
-> that affected both `cc -9` and `ccd`) and copy-paste fixes.
+Most behavior is controlled through `cc setup` and `cc config`, so users can keep
+`cc` simple and opt into more advanced behavior only when they need it.
+
+> **First time with 9Router + OAuth + prompt-cache fix?** Read
+> [`docs/SETUP-GUIDE.md`](docs/SETUP-GUIDE.md) and run `cc setup install-deps` then `cc setup check`.
+> PM-oriented overview: [`docs/PRODUCT.md`](docs/PRODUCT.md).
+>
+> **Hitting weird `/context` bloat or other quirks?** See
+> [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md). Planned setup improvements:
+> [`docs/TODO.md`](docs/TODO.md).
 
 Supported now:
 
@@ -42,19 +47,98 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Usage
 
-### Official mode
+### Default mode
 
 ```bash
 cc
-cc -9
-cc -9 resume
 cc --model sonnet
 cc resume
+cc setup
+cc setup check
 cc doctor
+```
+
+`cc` is the quick launcher. `cc setup` and `cc config` are where users decide
+what the launcher should do.
+
+### Advanced mode
+
+```bash
+cc -9
+cc -9 resume
+cc -9 --model sonnet
 cc -9 doctor
 ```
 
-`cc -9 doctor` will also probe `${NINEROUTER_URL}/api/health` when URL is set.
+In `cc -9`, Claude slot selectors such as `sonnet`, `haiku`, `opus`, and
+`claude-sonnet-*` are rewritten to the active `NINEROUTER_*_MODEL` targets
+before Claude Code launches. This keeps agent/subagent launches aligned with
+your `cc-normal` / `cc-lite` / `cc-pro` routing.
+
+`cc -9` is the opt-in path for 9Router + cache-fix. It stays available, but it
+is not the main story for new users.
+
+`cc -9 doctor` also reports whether agent slot alias rewrite is active, so you
+can confirm that explicit `--model sonnet|haiku|opus` launches will remap onto
+your active `cc-*` slots before Claude Code starts.
+
+### Supported now
+
+- `-9` for 9Router / cache-fix routing
+- `ccd` for DeepSeek mode and AI-assisted setup
+- `setup`, `config`, and `doctor` for onboarding and diagnostics
+
+`-d` and `-a` are good future alias candidates if you want a more public-facing
+flag family later, but they are not implemented yet.
+
+### Permission / bypass settings (`cc config`)
+
+cc-router keeps its own small config file (separate from Claude Code):
+
+- **Linux/macOS:** `~/.config/cc-router/config.json`
+- **Windows:** `%USERPROFILE%\.config\cc-router\config.json`
+
+Interactive setup:
+
+```bash
+cc config setup
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `allowDangerouslySkipPermissions` | When `true`, every `cc` / `cc -9` / `ccd` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
+| `cachePromptEnvEnabled` | When `true` (default), sets `CLAUDE_CODE_ATTRIBUTION_HEADER=false` and `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` on every launch |
+| `cacheFixEnabled` | When `true` (default), **official `cc`** sets `ANTHROPIC_BASE_URL` to the local cache-fix proxy |
+| `cacheFix9routerEnabled` | When `true` (default), **`cc -9`** uses cache-fix at `cacheFixUrl` with upstream at `nineRouterUrl` / `NINEROUTER_URL` |
+| `cacheFixUrl` | cache-fix listen URL (default `http://127.0.0.1:9801`) — probed at `/health` by `cc doctor` |
+| `nineRouterUrl` | Fallback 9Router base when `NINEROUTER_URL` is unset (default `http://127.0.0.1:20128`) |
+| `claudePermissionsTarget` | Default file for `cc config claude …`: `none`, `global` (`~/.claude/settings.json`), or `project` (`<repo>/.claude/settings.json`) |
+
+Prompt-cache defaults and [claude-code-cache-fix](https://github.com/cnighswonger/claude-code-cache-fix) chaining are documented in [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md) §7–§8.
+
+Examples:
+
+```bash
+cc config set allowDangerouslySkipPermissions on
+cc config set cacheFix9routerEnabled on   # default on; cc -9 → cache-fix → 9Router
+cc config set cacheFixEnabled on          # default on; official cc → cache-fix → Anthropic
+cc config set cacheFixUrl http://127.0.0.1:9801
+cc config set claudePermissionsTarget global
+cc config claude set permissions.defaultMode acceptEdits --global
+cc config claude enable-bypass-permissions --project
+cc config show
+```
+
+One-shot without editing JSON:
+
+```bash
+CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS=1 cc
+```
+
+See `config.example.json` in the repo root.
+
+If you want a guided first run, `cc setup` is the setup path; if you want
+to make the launcher more opinionated, `cc config` is where those defaults live.
 
 9Router env:
 
@@ -94,6 +178,8 @@ ccd resume
 ccd doctor
 ```
 
+DeepSeek **prompt cache** verification: [`docs/CCD-CACHE-BENCH.md`](docs/CCD-CACHE-BENCH.md) and `scripts/ccd-cache-bench.sh`.
+
 `ccd setup` will:
 
 - Ask for `DEEPSEEK_API_KEY`
@@ -132,6 +218,12 @@ For verbose diagnostics with a full env / launcher / settings.json
 breakdown, use `cc -9 doctor detail` (or `cc doctor detail` / `ccd doctor`).
 For the underlying root causes behind common bloat / routing issues, see
 [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md).
+
+For local shell regressions, run:
+
+```bash
+bash scripts/test.sh
+```
 
 Supported `ccd` options:
 

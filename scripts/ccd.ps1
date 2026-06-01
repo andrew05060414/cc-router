@@ -326,10 +326,11 @@ function Invoke-DeepSeekClaude {
     if ($ccdToolSearch -ne '') {
       $env:ENABLE_TOOL_SEARCH = $ccdToolSearch
     }
+    Set-CcRouterCachePromptEnv
     if ($AutocompactPct -gt 0) {
       $env:CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $AutocompactPct.ToString()
     }
-    & claude @ClaudeArgs
+    Invoke-CcRouterClaude @ClaudeArgs
   } finally {
     Clear-CCDSEnv
     Restore-CCDSProcessEnv $bak

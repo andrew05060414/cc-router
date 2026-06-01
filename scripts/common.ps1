@@ -19,6 +19,8 @@ $script:CCDS_ENV_KEYS = @(
   'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
   'ENABLE_TOOL_SEARCH',
   'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+  'CLAUDE_CODE_ATTRIBUTION_HEADER',
+  'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS'
 )
 
 function Get-CCDSProcessEnvBackup {
@@ -77,4 +79,16 @@ function Get-DeepSeekToken {
   if (-not $token) { $token = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY', 'User') }
   if (-not $token) { $token = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY', 'Machine') }
   return $token
+}
+
+$configCandidates = @(
+  (Join-Path $PSScriptRoot 'lib\cc-config.ps1')
+  (Join-Path $HOME '.ccdeepseek\share\cc-router\lib\cc-config.ps1')
+  (Join-Path $HOME '.local\share\cc-router\lib\cc-config.ps1')
+)
+foreach ($cfgPath in $configCandidates) {
+  if (Test-Path -LiteralPath $cfgPath) {
+    . $cfgPath
+    break
+  }
 }
