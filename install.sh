@@ -9,6 +9,7 @@ mkdir -p "${BIN_DIR}" "${SHARE_DIR}" "${ROUTER_SHARE}/lib" "${ROUTER_SHARE}/docs
 
 install -m 755 "${ROOT}/scripts/cc" "${BIN_DIR}/cc"
 install -m 755 "${ROOT}/scripts/ccd" "${BIN_DIR}/ccd"
+install -m 755 "${ROOT}/scripts/ccs" "${BIN_DIR}/ccs"
 if [[ -f "${ROOT}/scripts/ccd-cache-bench.sh" ]]; then
   install -m 755 "${ROOT}/scripts/ccd-cache-bench.sh" "${BIN_DIR}/ccd-cache-bench"
 fi

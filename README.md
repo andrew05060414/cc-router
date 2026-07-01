@@ -82,9 +82,45 @@ is not the main story for new users.
 can confirm that explicit `--model sonnet|haiku|opus` launches will remap onto
 your active `cc-*` slots before Claude Code starts.
 
+### CC Switch mode (`ccs`)
+
+```bash
+ccs
+ccs resume
+ccs --model sonnet
+ccs doctor
+```
+
+`ccs` is the **recommended path for users who do not have an Anthropic
+account** and route everything through [CC Switch](https://github.com/farion1231/cc-switch)
+instead. It sets `ANTHROPIC_BASE_URL` to the CC Switch proxy
+(`http://127.0.0.1:15721` by default) and lets CC Switch handle:
+
+- model mapping (`claude-sonnet-4-X` → `ANTHROPIC_DEFAULT_SONNET_MODEL`, etc.)
+- `apiFormat` conversion (`anthropic` ↔ `openai_chat` / `openai_responses` / `gemini_native`)
+- failover + circuit-breaker across multiple Provider accounts
+- per-request usage logging
+
+`ccs` does **not** chain the cache-fix proxy (no Anthropic account → no
+prefix cache to optimize) and does **not** rewrite `--model sonnet|haiku|opus`
+to `cc-normal/cc-lite/cc-pro` (CC Switch model mapping expects the canonical
+`claude-*` name). For 9Router slot alias behavior, keep using `cc -9`.
+
+Override the proxy URL when needed:
+
+```bash
+CC_CCS_PROXY_URL=http://host:port ccs
+# or persist:
+cc config set ccsProxyUrl http://host:port
+```
+
+`ccs doctor` checks that the CC Switch proxy is reachable and prints the
+effective env that would be injected.
+
 ### Supported now
 
 - `-9` for 9Router / cache-fix routing
+- `ccs` for CC Switch proxy routing (recommended when no Anthropic account)
 - `ccd` for DeepSeek mode and AI-assisted setup
 - `setup`, `config`, and `doctor` for onboarding and diagnostics
 
@@ -106,12 +142,13 @@ cc config setup
 
 | Setting | Meaning |
 | --- | --- |
-| `allowDangerouslySkipPermissions` | When `true`, every `cc` / `cc -9` / `ccd` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
+| `allowDangerouslySkipPermissions` | When `true`, every `cc` / `cc -9` / `ccs` / `ccd` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
 | `cachePromptEnvEnabled` | When `true` (default), sets `CLAUDE_CODE_ATTRIBUTION_HEADER=false` and `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` on every launch |
 | `cacheFixEnabled` | When `true` (default), **official `cc`** sets `ANTHROPIC_BASE_URL` to the local cache-fix proxy |
-| `cacheFix9routerEnabled` | When `true` (default), **`cc -9`** uses cache-fix at `cacheFixUrl` with upstream at `nineRouterUrl` / `NINEROUTER_URL` |
+| `cacheFix9routerEnabled` | When `true` (default), **`cc -9`** uses cache-fix at `cacheFixUrl` with upstream at `nineRouterUrl` / `NINEROUTER_URL`. Set to `off` if you do not have an Anthropic account — the proxy then has nothing to optimize. |
 | `cacheFixUrl` | cache-fix listen URL (default `http://127.0.0.1:9801`) — probed at `/health` by `cc doctor` |
 | `nineRouterUrl` | Fallback 9Router base when `NINEROUTER_URL` is unset (default `http://127.0.0.1:20128`) |
+| `ccsProxyUrl` | CC Switch proxy URL for `ccs` (default `http://127.0.0.1:15721`) — probed at `/health` by `ccs doctor` |
 | `claudePermissionsTarget` | Default file for `cc config claude …`: `none`, `global` (`~/.claude/settings.json`), or `project` (`<repo>/.claude/settings.json`) |
 
 Prompt-cache defaults and [claude-code-cache-fix](https://github.com/cnighswonger/claude-code-cache-fix) chaining are documented in [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md) §7–§8.

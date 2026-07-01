@@ -428,6 +428,45 @@ cc_router_unset_routing_env() {
     CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK
 }
 
+# Print a single tree-style doctor line.
+#   $1 prefix : "├" or "└"
+#   $2 status : ok | fail | warn | info | (empty)
+#   $3 label  : short label (padded to 22 chars)
+#   $4 value  : value (optional)
+cc_router_doctor_item() {
+  local prefix="$1" status="$2" label="$3" value="${4:-}"
+  local badge=""
+  case "${status}" in
+    ok)   badge="OK  " ;;
+    fail) badge="FAIL" ;;
+    warn) badge="WARN" ;;
+    info) badge="INFO" ;;
+  esac
+  if [[ -n "${badge}" ]]; then
+    if [[ -n "${value}" ]]; then
+      printf '    %s %s  %-22s %s\n' "${prefix}" "${badge}" "${label}" "${value}"
+    else
+      printf '    %s %s  %s\n' "${prefix}" "${badge}" "${label}"
+    fi
+  else
+    if [[ -n "${value}" ]]; then
+      printf '    %s %-22s %s\n' "${prefix}" "${label}" "${value}"
+    else
+      printf '    %s %s\n' "${prefix}" "${label}"
+    fi
+  fi
+}
+
+# Print a multi-line detail block under a doctor line. Each input line is
+# prefixed with 6 spaces so it visually attaches to the parent item.
+#   $* : the lines to print
+cc_router_doctor_detail() {
+  local line
+  for line in "$@"; do
+    printf '      %s\n' "${line}"
+  done
+}
+
 # env(1) cannot invoke shell functions; use a subshell with unset/export instead.
 cc_router_run_official_claude() {
   (
@@ -454,6 +493,9 @@ cc_router_run_9router_claude() {
     cc_router_ensure_9router_stack_deps || exit 1
   fi
   client_base="$(cc_router_ninerouter_client_base_url)"
+  if [[ "${client_base}" == */v1 ]]; then
+    client_base="${client_base%/v1}"
+  fi
   (
     cc_router_unset_routing_env
     export ANTHROPIC_BASE_URL="${client_base}/v1"
@@ -470,9 +512,19 @@ cc_router_run_9router_claude() {
     if [[ -n "${nr_key}" ]]; then
       export ANTHROPIC_AUTH_TOKEN="${nr_key}"
     fi
+    # Whitelist the default sonnet slot so Claude Code's v2.1.150+ client-side
+    # model allowlist accepts the custom 9Router name. With discovery also on,
+    # 9Router's /v1/models exposes the other slots (opus/haiku) to the picker.
+    export ANTHROPIC_CUSTOM_MODEL_OPTION="${nr_sonnet_model}"
+    export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="9Router (sonnet)"
+    export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
     cc_router_export_cache_prompt_env
     cc_router_normalize_model_args "${nr_opus_model}" "${nr_sonnet_model}" "${nr_haiku_model}" "$@"
-    cc_router_run_claude "${CC_ROUTER_NORMALIZED_ARGS[@]}"
+    if ((${#CC_ROUTER_NORMALIZED_ARGS[@]} > 0)); then
+      cc_router_run_claude "${CC_ROUTER_NORMALIZED_ARGS[@]}"
+    else
+      cc_router_run_claude
+    fi
   )
 }
 
@@ -751,6 +803,10 @@ cc_router_config_dispatch() {
           cc_router_config_set_string "${key}" "${val}"
           echo "Set ${key}=$(cc_router_config_get "${key}" "")"
           ;;
+        ccsProxyUrl)
+          cc_router_config_set_string "${key}" "${val}"
+          echo "Set ${key}=$(cc_router_config_get "${key}" "")"
+          ;;
         claudePermissionsTarget)
           case "${val}" in
             none | global | project) cc_router_config_set_string "${key}" "${val}" ;;
@@ -763,7 +819,7 @@ cc_router_config_dispatch() {
           ;;
         *)
           echo "Unknown key: ${key}" >&2
-          echo "Supported: allowDangerouslySkipPermissions, cachePromptEnvEnabled, cacheFixEnabled, cacheFixUrl, cacheFix9routerEnabled, nineRouterUrl, claudePermissionsTarget" >&2
+          echo "Supported: allowDangerouslySkipPermissions, cachePromptEnvEnabled, cacheFixEnabled, cacheFixUrl, cacheFix9routerEnabled, nineRouterUrl, ccsProxyUrl, claudePermissionsTarget" >&2
           return 2
           ;;
       esac
