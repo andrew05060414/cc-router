@@ -1,0 +1,16 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+    "CLAUDE_CODE_DISABLE_TELEMETRY": "1",
+    "ANTHROPIC_DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "API_TIMEOUT_MS": "600000",
+    "DISABLE_AUTOUPDATER": "1",
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "git": {
+    "includeCoAuthor": false
+  },
+  "model": "opus",
+  "skipDangerousModePermissionPrompt": true
+}
