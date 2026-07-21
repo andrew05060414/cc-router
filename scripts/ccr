@@ -88,6 +88,7 @@ Usage:
 
 Options:
   -h, --help                 Show help
+  --persist                  Write the deepseek env block to your shell profile (permanent)
   -C, --current, --here      Keep current directory
   --worktree <name>          Run in .worktrees/<name> (requires clean git repo)
   --model <id>               Default: deepseek-v4-pro[1m]
@@ -128,7 +129,7 @@ EOF
 
 ccr_run_deepseek() {
   local model='deepseek-v4-pro[1m]' haiku_model='deepseek-v4-flash' max_output='65536' autocompact_pct='0'
-  local worktree_name='' use_current_dir='0' args=()
+  local worktree_name='' use_current_dir='0' persist='0' args=()
   local print_prompt=0 prompt_help=0
 
   if [[ $# -eq 0 ]]; then
@@ -141,6 +142,8 @@ ccr_run_deepseek() {
         show_deepseek_help
         exit 0
         ;;
+      --persist)
+        persist='1'; shift ;;
       doctor)
         ccr_deepseek_doctor
         exit $?
@@ -207,28 +210,90 @@ ccr_run_deepseek() {
     ccr_die "Set DEEPSEEK_API_KEY before running ccr deepseek."
   fi
 
-  export ANTHROPIC_BASE_URL='https://api.deepseek.com/anthropic'
-  export ANTHROPIC_AUTH_TOKEN="${DEEPSEEK_API_KEY}"
-  export ANTHROPIC_MODEL="${model}"
-  export ANTHROPIC_DEFAULT_OPUS_MODEL="${model}"
-  export ANTHROPIC_DEFAULT_FABLE_MODEL="${model}"
-  export ANTHROPIC_DEFAULT_SONNET_MODEL="${model}"
-  export ANTHROPIC_DEFAULT_HAIKU_MODEL="${haiku_model}"
-  export CLAUDE_CODE_SUBAGENT_MODEL="${haiku_model}"
-  export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${max_output}"
-  export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1'
-  export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK='1'
-  export CLAUDE_CODE_EFFORT_LEVEL='max'
-  local ccd_tool_search="${CCD_TOOL_SEARCH-true}"
-  if [[ -n "${ccd_tool_search}" ]]; then
-    export ENABLE_TOOL_SEARCH="${ccd_tool_search}"
-  fi
-  ccr_export_cache_prompt_env
-  if [[ "${autocompact_pct}" != "0" ]]; then
-    export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="${autocompact_pct}"
+  # Persist mode: write the deepseek env block into the shell profile and exit.
+  if [[ "${persist}" == "1" ]]; then
+    ccr_deepseek_persist_env "${model}" "${haiku_model}" "${max_output}" "${autocompact_pct}"
+    echo "[ccr deepseek] 永久模式已配置。新开 shell 后直接运行 'claude' 即可。"
+    return 0
   fi
 
+  ccr_deepseek_export_env "${model}" "${haiku_model}" "${max_output}" "${autocompact_pct}"
+  ccr_export_cache_prompt_env
+
   ccr_exec_claude "${args[@]}"
+}
+
+# Emit the deepseek env as `export KEY=VALUE` lines (single source for both
+# temp-export and --persist). Honors the parsed model/haiku/max/autocompact values.
+ccr_deepseek_env_lines() {
+  local model="$1" haiku_model="$2" max_output="$3" autocompact_pct="$4"
+  local ccd_tool_search="${CCD_TOOL_SEARCH-true}"
+  cat <<EOF
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+ANTHROPIC_AUTH_TOKEN=${DEEPSEEK_API_KEY}
+ANTHROPIC_API_KEY=${DEEPSEEK_API_KEY}
+ANTHROPIC_MODEL=${model}
+ANTHROPIC_DEFAULT_OPUS_MODEL=${model}
+ANTHROPIC_DEFAULT_FABLE_MODEL=${model}
+ANTHROPIC_DEFAULT_SONNET_MODEL=${model}
+ANTHROPIC_DEFAULT_HAIKU_MODEL=${haiku_model}
+CLAUDE_CODE_SUBAGENT_MODEL=${haiku_model}
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=${max_output}
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
+CLAUDE_CODE_EFFORT_LEVEL=max
+EOF
+  if [[ -n "${ccd_tool_search}" ]]; then
+    printf 'ENABLE_TOOL_SEARCH=%s\n' "${ccd_tool_search}"
+  fi
+  if [[ "${autocompact_pct}" != "0" ]]; then
+    printf 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=%s\n' "${autocompact_pct}"
+  fi
+}
+
+# Export the deepseek env into the current (sub)shell.
+ccr_deepseek_export_env() {
+  local line
+  while IFS='=' read -r line; do
+    [[ -z "$line" ]] && continue
+    export "$line"
+  done < <(ccr_deepseek_env_lines "$@")
+}
+
+# Persist the deepseek env block into the user's shell profile (idempotent).
+ccr_deepseek_persist_env() {
+  local profile
+  profile="$(ccr_vendor_profile_file)"
+  touch "$profile"
+
+  local begin="# >>> ccr deepseek (managed) >>>"
+  local end="# <<< ccr deepseek (managed) <<<"
+
+  if grep -qF "$begin" "$profile" 2>/dev/null; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v b="$begin" -v e="$end" '
+      $0 == b {skip=1; next}
+      $0 == e {skip=0; next}
+      skip != 1 {print}
+    ' "$profile" >"$tmp"
+    mv "$tmp" "$profile"
+  fi
+
+  {
+    printf '%s\n' "$begin"
+    printf '# deepseek env (persisted by `ccr deepseek --persist`). Delete this block to undo.\n'
+    local line key val
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      key="${line%%=*}"
+      val="${line#*=}"
+      printf 'export %s=%q\n' "$key" "$val"
+    done < <(ccr_deepseek_env_lines "$@")
+    printf '%s\n' "$end"
+  } >>"$profile"
+
+  echo "[ccr deepseek] 已写入 ${profile}（重开 shell 或 source 后永久生效）"
 }
 
 ccr_die() {
@@ -640,12 +705,23 @@ ccr_kimi_bootstrap() {
   node "$script"
 }
 
-# Resolve the Kimi API token from local settings or env.
-ccr_kimi_token() {
+# ---------------- Generic vendor env helpers (shared by kimi/deepseek/...) ----------------
+
+# Resolve a vendor API token from local settings or env.
+# Usage: ccr_vendor_token <extra-env-var...>   (e.g. ccr_vendor_token DEEPSEEK_API_KEY)
+# Order: settings.json env.ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY, then each named env var,
+# then generic ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY.
+ccr_vendor_token() {
   local token=""
   if [[ -f "${HOME}/.claude/settings.json" ]] && command -v jq >/dev/null 2>&1; then
     token="$(jq -r '.env.ANTHROPIC_AUTH_TOKEN // .env.ANTHROPIC_API_KEY // empty' "${HOME}/.claude/settings.json" 2>/dev/null || true)"
   fi
+  local var
+  for var in "$@"; do
+    if [[ -z "${token}" && -n "${!var:-}" ]]; then
+      token="${!var}"
+    fi
+  done
   if [[ -z "${token}" && -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
     token="${ANTHROPIC_AUTH_TOKEN}"
   fi
@@ -656,7 +732,7 @@ ccr_kimi_token() {
 }
 
 # Shell profile to persist env into (bash/zsh).
-ccr_kimi_profile_file() {
+ccr_vendor_profile_file() {
   if [[ -n "${ZSH_VERSION:-}" || "${SHELL:-}" == */zsh ]]; then
     printf '%s\n' "${HOME}/.zshrc"
   else
@@ -664,17 +740,18 @@ ccr_kimi_profile_file() {
   fi
 }
 
-# Persist the kimi env block into the user's shell profile (idempotent).
-ccr_kimi_persist_env() {
-  local template="$1" token="$2"
+# Persist a vendor env block into the user's shell profile (idempotent).
+# Usage: ccr_vendor_persist_env <vendor> <template.json> <token>
+ccr_vendor_persist_env() {
+  local vendor="$1" template="$2" token="$3"
   local profile
-  profile="$(ccr_kimi_profile_file)"
+  profile="$(ccr_vendor_profile_file)"
   touch "$profile"
 
-  local begin="# >>> ccr kimi (managed) >>>"
-  local end="# <<< ccr kimi (managed) <<<"
+  local begin="# >>> ccr ${vendor} (managed) >>>"
+  local end="# <<< ccr ${vendor} (managed) <<<"
 
-  # Remove any previous managed block.
+  # Remove any previous managed block for this vendor.
   if grep -qF "$begin" "$profile" 2>/dev/null; then
     local tmp
     tmp="$(mktemp)"
@@ -688,11 +765,11 @@ ccr_kimi_persist_env() {
 
   {
     printf '%s\n' "$begin"
-    printf '# Kimi-for-coding env (persisted by `ccr kimi --persist`). Delete this block to undo.\n'
+    printf '# %s env (persisted by `ccr %s --persist`). Delete this block to undo.\n' "$vendor" "$vendor"
     # Emit env exports from the template, substituting the resolved token.
     while IFS='=' read -r key val; do
       [[ -z "$key" ]] && continue
-      if [[ "$key" == "ANTHROPIC_AUTH_TOKEN" ]]; then
+      if [[ "$key" == "ANTHROPIC_AUTH_TOKEN" || "$key" == "ANTHROPIC_API_KEY" ]]; then
         val="$token"
       fi
       printf 'export %s=%q\n' "$key" "$val"
@@ -702,8 +779,13 @@ ccr_kimi_persist_env() {
     printf '%s\n' "$end"
   } >>"$profile"
 
-  echo "[ccr kimi] 已写入 ${profile}（重开 shell 或 source 后永久生效）"
+  echo "[ccr ${vendor}] 已写入 ${profile}（重开 shell 或 source 后永久生效）"
 }
+
+# Back-compat shims for the old kimi-specific names.
+ccr_kimi_token() { ccr_vendor_token; }
+ccr_kimi_profile_file() { ccr_vendor_profile_file; }
+ccr_kimi_persist_env() { ccr_vendor_persist_env "kimi" "$@"; }
 
 ccr_run_kimi() {
   local persist=0 do_bootstrap=1
