@@ -3,48 +3,62 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
-SHARE_DIR="${HOME}/.local/share/ccdeepseek"
-ROUTER_SHARE="${HOME}/.local/share/cc-router"
-mkdir -p "${BIN_DIR}" "${SHARE_DIR}" "${ROUTER_SHARE}/lib" "${ROUTER_SHARE}/docs"
+SHARE_DIR="${HOME}/.local/share/cc-router"
+mkdir -p "${BIN_DIR}" "${SHARE_DIR}/lib" "${SHARE_DIR}/docs" "${SHARE_DIR}/templates/remote" "${SHARE_DIR}/remote-pack"
 
-install -m 755 "${ROOT}/scripts/cc" "${BIN_DIR}/cc"
+# Migrate old ccdeepseek share dir if present.
+OLD_SHARE_DIR="${HOME}/.local/share/ccdeepseek"
+if [[ -d "${OLD_SHARE_DIR}" ]]; then
+  echo "[install] Migrating old ${OLD_SHARE_DIR} to ${SHARE_DIR} ..."
+  if [[ -f "${OLD_SHARE_DIR}/dramatic-prompt.md" ]]; then
+    mv "${OLD_SHARE_DIR}/dramatic-prompt.md" "${SHARE_DIR}/templates/dramatic-prompt.md"
+  fi
+  rm -rf "${OLD_SHARE_DIR}"
+fi
+
+# Main entry point
+install -m 755 "${ROOT}/scripts/ccr" "${BIN_DIR}/ccr"
+
+# Legacy aliases
 install -m 755 "${ROOT}/scripts/ccd" "${BIN_DIR}/ccd"
 install -m 755 "${ROOT}/scripts/ccs" "${BIN_DIR}/ccs"
-if [[ -f "${ROOT}/scripts/cc-remote" ]]; then
-  install -m 755 "${ROOT}/scripts/cc-remote" "${BIN_DIR}/cc-remote"
+if [[ -f "${ROOT}/scripts/cck" ]]; then
+  install -m 755 "${ROOT}/scripts/cck" "${BIN_DIR}/cck"
 fi
-if [[ -f "${ROOT}/scripts/ccd-cache-bench.sh" ]]; then
-  install -m 755 "${ROOT}/scripts/ccd-cache-bench.sh" "${BIN_DIR}/ccd-cache-bench"
-fi
-install -m 644 "${ROOT}/scripts/lib/cc-common.sh" "${ROUTER_SHARE}/lib/cc-common.sh"
-if [[ -f "${ROOT}/scripts/lib/cc-setup.sh" ]]; then
-  install -m 644 "${ROOT}/scripts/lib/cc-setup.sh" "${ROUTER_SHARE}/lib/cc-setup.sh"
-fi
-for lib in cc-remote.sh cc-remote-config.sh cc-remote-ssh.sh cc-remote-skills.sh; do
+
+# Libraries
+for lib in ccr-common.sh ccr-setup.sh ccr-remote.sh ccr-remote-config.sh ccr-remote-ssh.sh ccr-remote-skills.sh; do
   if [[ -f "${ROOT}/scripts/lib/${lib}" ]]; then
-    install -m 644 "${ROOT}/scripts/lib/${lib}" "${ROUTER_SHARE}/lib/${lib}"
-  fi
-done
-for doc in SETUP-GUIDE.md SETUP-NOTES.md CCD-CACHE-BENCH.md TODO.md PRODUCT.md CC-REMOTE.md; do
-  if [[ -f "${ROOT}/docs/${doc}" ]]; then
-    install -m 644 "${ROOT}/docs/${doc}" "${ROUTER_SHARE}/docs/${doc}"
+    install -m 644 "${ROOT}/scripts/lib/${lib}" "${SHARE_DIR}/lib/${lib}"
   fi
 done
 
+# Templates
+if [[ -d "${ROOT}/templates/remote" ]]; then
+  install -m 644 "${ROOT}/templates/remote/"*.json "${SHARE_DIR}/templates/remote/"
+fi
 if [[ -f "${ROOT}/docs/dramatic-prompt.md" ]]; then
-  install -m 644 "${ROOT}/docs/dramatic-prompt.md" "${SHARE_DIR}/dramatic-prompt.md"
+  install -m 644 "${ROOT}/docs/dramatic-prompt.md" "${SHARE_DIR}/templates/dramatic-prompt.md"
 fi
 
+# Docs
+for doc in SETUP-GUIDE.md SETUP-NOTES.md CR-CACHE-BENCH.md TODO.md PRODUCT.md CR-REMOTE.md; do
+  if [[ -f "${ROOT}/docs/${doc}" ]]; then
+    install -m 644 "${ROOT}/docs/${doc}" "${SHARE_DIR}/docs/${doc}"
+  fi
+done
+
+# Example config
 if [[ -f "${ROOT}/config.example.json" ]]; then
-  install -m 644 "${ROOT}/config.example.json" "${ROUTER_SHARE}/config.example.json"
+  install -m 644 "${ROOT}/config.example.json" "${SHARE_DIR}/config.example.json"
 fi
 
 echo "Install complete."
-echo "First-time (9Router + OAuth + cache-fix): cc setup"
-echo "  → docs also at ${ROUTER_SHARE}/docs/SETUP-GUIDE.md"
-echo "cc-router config (optional): cc config setup"
+echo "First-time (9Router + OAuth + cache-fix): ccr setup"
+echo "  → docs also at ${SHARE_DIR}/docs/SETUP-GUIDE.md"
+echo "cc-router config (optional): ccr config setup"
 echo "  → writes ~/.config/cc-router/config.json"
-echo "Remote onboarding: cc-remote pack && cc-remote setup <host|alias>"
-echo "  → docs at ${ROUTER_SHARE}/docs/CC-REMOTE.md"
+echo "Remote onboarding: ccr remote pack && ccr remote setup <host|alias>"
+echo "  → docs at ${SHARE_DIR}/docs/CR-REMOTE.md"
 echo "If needed, add ~/.local/bin to PATH:"
 echo '  export PATH="$HOME/.local/bin:$PATH"'
