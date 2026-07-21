@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot\common.ps1"
+. "$PSScriptRoot\lib\ccr-common.ps1"
 
 function Show-Help {
 @"
@@ -512,7 +512,7 @@ if ($cmd -eq 'config') {
   if (Get-Command Invoke-CcRouterConfigCommand -ErrorAction SilentlyContinue) {
     Invoke-CcRouterConfigCommand $configArgs
   } else {
-    throw 'cc-config.ps1 not found. Re-run install.ps1 from cc-router.'
+    throw 'ccr-config.ps1 not found. Re-run install.ps1 from cc-router.'
   }
   exit 0
 }

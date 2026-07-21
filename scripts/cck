@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Deprecated: use 'ccr kimi' instead.
+echo "cck is deprecated; use: ccr kimi" >&2
+exec "$(dirname "$0")/ccr" kimi "$@"

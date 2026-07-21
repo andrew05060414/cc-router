@@ -7,7 +7,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot\common.ps1"
+. "$PSScriptRoot\lib\ccr-common.ps1"
 
 function Show-BenchHelp {
 @'
