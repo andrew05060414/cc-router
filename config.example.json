@@ -1,9 +1,10 @@
 {
-  "allowDangerouslySkipPermissions": false,
+  "allowDangerouslySkipPermissions": true,
   "claudePermissionsTarget": "none",
   "cachePromptEnvEnabled": true,
   "cacheFixEnabled": true,
   "cacheFixUrl": "http://127.0.0.1:9801",
   "cacheFix9routerEnabled": true,
-  "nineRouterUrl": "http://127.0.0.1:20128"
+  "nineRouterUrl": "http://127.0.0.1:20128",
+  "ccsProxyUrl": "http://127.0.0.1:15721"
 }
