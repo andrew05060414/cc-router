@@ -5,7 +5,7 @@ trap {
   exit 1
 }
 
-. "$PSScriptRoot\common.ps1"
+. "$PSScriptRoot\lib\ccr-common.ps1"
 
 function Show-Help {
 @"
@@ -127,8 +127,8 @@ function Resolve-PromptTemplatePath {
   $scriptDir = Split-Path -Parent $PSCommandPath
   $candidates = @(
     (Join-Path (Join-Path $scriptDir '..') 'docs\dramatic-prompt.md'),
-    (Join-Path $HOME '.ccdeepseek\share\dramatic-prompt.md'),
-    (Join-Path $HOME '.local\share\ccdeepseek\dramatic-prompt.md'),
+    (Join-Path $HOME '.local\share\cc-router\templates\dramatic-prompt.md'),
+    (Join-Path $HOME '.local\share\cc-router\templates\dramatic-prompt.md'),
     (Join-Path (Get-Location).Path 'docs\dramatic-prompt.md')
   )
   foreach ($candidate in $candidates) {
@@ -142,7 +142,7 @@ Could not locate dramatic-prompt.md template.
 
 Either:
   - set CCD_PROMPT_TEMPLATE=C:\path\to\dramatic-prompt.md
-  - or place file at ~/.ccdeepseek/share/dramatic-prompt.md
+  - or place file at ~/.local/share/cc-router/templates/dramatic-prompt.md
   - or run this command from a checkout that contains docs/dramatic-prompt.md
 "@
 }
