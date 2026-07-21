@@ -1,10 +1,10 @@
-# DeepSeek prompt cache bench (ccd)
+# DeepSeek prompt cache bench (ccr deepseek)
 
-Use this when you want to confirm that **ccd** (or your DeepSeek routing) is
+Use this when you want to confirm that **ccr deepseek** (or your DeepSeek routing) is
 getting **prefix / prompt cache hits** on repeated turns — not just that the
 API works.
 
-cc-router injects cache-friendly env on every `cc`, `cc -9`, and `ccd` launch:
+cc-router injects cache-friendly env on every `ccr`, `ccr -9`, and `ccr deepseek` launch:
 
 ```text
 CLAUDE_CODE_ATTRIBUTION_HEADER=false
@@ -22,21 +22,21 @@ From the repo (or after `install.sh` copies scripts):
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
-chmod +x scripts/ccd-cache-bench.sh
-./scripts/ccd-cache-bench.sh
+chmod +x scripts/ccr deepseek-cache-bench.sh
+./scripts/ccr deepseek-cache-bench.sh
 ```
 
 PowerShell:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = 'sk-...'
-.\scripts\ccd-cache-bench.ps1
+.\scripts\ccr deepseek-cache-bench.ps1
 ```
 
 Dry run (env only, no API):
 
 ```bash
-./scripts/ccd-cache-bench.sh --dry-run
+./scripts/ccr deepseek-cache-bench.sh --dry-run
 ```
 
 The script runs **three** identical `claude --print` calls with a fixed system
@@ -59,7 +59,7 @@ In Claude Code / provider usage metadata (wording varies by version):
 - Every run shows large `cache_creation` and zero `cache_read` → prefix is
   changing every request (git status injection, different system text, MCP
   bloat, or attribution header).
-- Run 2+ still cold → compare with `ccd doctor` and ensure you are not
+- Run 2+ still cold → compare with `ccr deepseek doctor` and ensure you are not
   overriding `CC_DISABLE_GIT_INSTRUCTIONS` or `CC_ATTRIBUTION_HEADER`.
 
 Optional overrides (same as launchers):
@@ -75,12 +75,12 @@ export CCD_TOOL_SEARCH=true
 ## Manual procedure
 
 1. `export DEEPSEEK_API_KEY=...`
-2. `ccd doctor` — key and URL hints OK.
+2. `ccr deepseek doctor` — key and URL hints OK.
 3. In a clean directory (no huge repo git state if testing without
    `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS`):
 
    ```bash
-   ccd --print --model 'deepseek-v4-pro[1m]' 'Reply: OK'
+   ccr deepseek --print --model 'deepseek-v4-pro[1m]' 'Reply: OK'
    ```
 
    Repeat the **exact same** command twice more.
@@ -102,8 +102,8 @@ file changes between turns; check `/cost` or provider dashboards if available.
 
 ---
 
-## Related: official `cc` + claude-code-cache-fix
+## Related: official `ccr` + claude-code-cache-fix
 
 That path is **Anthropic official** only (`cacheFixEnabled` in
-`~/.config/cc-router/config.json`). It does not apply to `ccd`. See
+`~/.config/cc-router/config.json`). It does not apply to `ccr deepseek`. See
 [SETUP-NOTES.md — claude-code-cache-fix](SETUP-NOTES.md).
