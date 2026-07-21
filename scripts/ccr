@@ -104,8 +104,9 @@ ccr remote - remote server Claude Code onboarding
 
 Usage:
   ccr remote pack [--platforms linux-x64,linux-arm64] [--skip-download] [--vendor kimi|deepseek|anthropic|default]
-  ccr remote install <host|alias>          # install ccr itself on remote host via SSH
+  ccr remote install [-v|--verbose] [-n|--dry-run] <host|alias>  # install ccr itself on remote host via SSH
   ccr remote setup <host|alias>            # install Claude Code on remote host
+  ccr remote push <host|alias>             # push current ccr scripts/templates to remote host
   ccr remote sync <host|alias>
   ccr remote ssh <host|alias> [claude args...]
   ccr remote config show
@@ -958,6 +959,15 @@ ccr_remote_dispatch() {
         exit 1
       fi
       ccr_remote_setup "$host"
+      ;;
+    push)
+      local host="${1:-}"
+      if [[ -z "$host" ]]; then
+        echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+        echo "用法: ccr remote push <host|alias>" >&2
+        exit 1
+      fi
+      ccr_remote_push "$host"
       ;;
     sync)
       local host="${1:-}"
