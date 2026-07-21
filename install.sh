@@ -57,6 +57,10 @@ done
 # Templates
 if [[ -d "${ROOT}/templates/remote" ]]; then
   install -m 644 "${ROOT}/templates/remote/"*.json "${SHARE_DIR}/templates/remote/"
+  # Non-JSON template assets (e.g. kimi-bootstrap.js)
+  for f in "${ROOT}/templates/remote/"*.js; do
+    [[ -f "$f" ]] && install -m 644 "$f" "${SHARE_DIR}/templates/remote/"
+  done
 fi
 if [[ -f "${ROOT}/docs/dramatic-prompt.md" ]]; then
   install -m 644 "${ROOT}/docs/dramatic-prompt.md" "${SHARE_DIR}/templates/dramatic-prompt.md"

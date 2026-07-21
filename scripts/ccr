@@ -607,19 +607,135 @@ ccr_kimi_template_path() {
   return 1
 }
 
+ccr_kimi_bootstrap_path() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local candidates=(
+    "${script_dir}/../templates/remote/kimi-bootstrap.js"
+    "${HOME}/.local/share/cc-router/templates/remote/kimi-bootstrap.js"
+  )
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" ]]; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Run the official Kimi-for-coding onboarding bootstrap (idempotent).
+# Enables third-party model support, marks onboarding complete, and removes
+# stale model-id env keys from ~/.claude/settings.json.
+ccr_kimi_bootstrap() {
+  local script
+  script="$(ccr_kimi_bootstrap_path)" || {
+    echo "WARN: kimi-bootstrap.js not found, skipping onboarding bootstrap" >&2
+    return 0
+  }
+  if ! command -v node >/dev/null 2>&1; then
+    echo "WARN: node not found, skipping kimi onboarding bootstrap" >&2
+    return 0
+  fi
+  node "$script"
+}
+
+# Resolve the Kimi API token from local settings or env.
+ccr_kimi_token() {
+  local token=""
+  if [[ -f "${HOME}/.claude/settings.json" ]] && command -v jq >/dev/null 2>&1; then
+    token="$(jq -r '.env.ANTHROPIC_AUTH_TOKEN // .env.ANTHROPIC_API_KEY // empty' "${HOME}/.claude/settings.json" 2>/dev/null || true)"
+  fi
+  if [[ -z "${token}" && -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+    token="${ANTHROPIC_AUTH_TOKEN}"
+  fi
+  if [[ -z "${token}" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    token="${ANTHROPIC_API_KEY}"
+  fi
+  printf '%s\n' "$token"
+}
+
+# Shell profile to persist env into (bash/zsh).
+ccr_kimi_profile_file() {
+  if [[ -n "${ZSH_VERSION:-}" || "${SHELL:-}" == */zsh ]]; then
+    printf '%s\n' "${HOME}/.zshrc"
+  else
+    printf '%s\n' "${HOME}/.bashrc"
+  fi
+}
+
+# Persist the kimi env block into the user's shell profile (idempotent).
+ccr_kimi_persist_env() {
+  local template="$1" token="$2"
+  local profile
+  profile="$(ccr_kimi_profile_file)"
+  touch "$profile"
+
+  local begin="# >>> ccr kimi (managed) >>>"
+  local end="# <<< ccr kimi (managed) <<<"
+
+  # Remove any previous managed block.
+  if grep -qF "$begin" "$profile" 2>/dev/null; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v b="$begin" -v e="$end" '
+      $0 == b {skip=1; next}
+      $0 == e {skip=0; next}
+      skip != 1 {print}
+    ' "$profile" >"$tmp"
+    mv "$tmp" "$profile"
+  fi
+
+  {
+    printf '%s\n' "$begin"
+    printf '# Kimi-for-coding env (persisted by `ccr kimi --persist`). Delete this block to undo.\n'
+    # Emit env exports from the template, substituting the resolved token.
+    while IFS='=' read -r key val; do
+      [[ -z "$key" ]] && continue
+      if [[ "$key" == "ANTHROPIC_AUTH_TOKEN" ]]; then
+        val="$token"
+      fi
+      printf 'export %s=%q\n' "$key" "$val"
+    done < <(jq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$template")
+    # Also export ANTHROPIC_API_KEY alias for tools that read it instead.
+    printf 'export ANTHROPIC_API_KEY=%q\n' "$token"
+    printf '%s\n' "$end"
+  } >>"$profile"
+
+  echo "[ccr kimi] 已写入 ${profile}（重开 shell 或 source 后永久生效）"
+}
+
 ccr_run_kimi() {
-  if [[ "${1:-}" == "--help" || "${1:-}" == "help" || "${1:-}" == "-h" ]]; then
-    cat <<'EOF'
+  local persist=0 do_bootstrap=1
+  local passthrough=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|help|-h)
+        cat <<'EOF'
 ccr kimi - Start Claude Code routed to Kimi coding API
 
 Usage:
-  ccr kimi [claude args...]
+  ccr kimi [options] [claude args...]
   ccr kimi resume [claude args...]
 
-Requires ANTHROPIC_AUTH_TOKEN (your Kimi token) in env or ~/.claude/settings.json.
+Options:
+  --persist        Write the kimi env block into your shell profile (permanent)
+  --no-bootstrap   Skip the onboarding bootstrap (default: run it, idempotent)
+
+Model tiers (Allegretto+):
+  Opus / Fable            -> k3[1m]            (1M context)
+  Sonnet / Haiku / Agent  -> kimi-for-coding-highspeed
+
+Token: read from ~/.claude/settings.json (env.ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY)
+or from the ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY environment variable.
 EOF
-    exit 0
-  fi
+        exit 0
+        ;;
+      --persist) persist=1; shift ;;
+      --no-bootstrap) do_bootstrap=0; shift ;;
+      *) passthrough+=("$1"); shift ;;
+    esac
+  done
+  set -- "${passthrough[@]}"
 
   if ! command -v claude >/dev/null 2>&1; then
     echo "Claude Code CLI not found. Install first: npm install -g @anthropic-ai/claude-code" >&2
@@ -628,18 +744,25 @@ EOF
 
   local template token
   template="$(ccr_kimi_template_path)" || exit 1
-
-  # Prefer explicit token from local settings; otherwise rely on ANTHROPIC_AUTH_TOKEN.
-  if [[ -f "${HOME}/.claude/settings.json" ]] && command -v jq >/dev/null 2>&1; then
-    token="$(jq -r '.env.ANTHROPIC_AUTH_TOKEN // empty' "${HOME}/.claude/settings.json" 2>/dev/null || true)"
-  fi
-
-  if [[ -z "${token}" && -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
-    token="${ANTHROPIC_AUTH_TOKEN}"
-  fi
+  token="$(ccr_kimi_token)"
 
   if [[ -z "${token}" ]]; then
-    echo "WARN: ANTHROPIC_AUTH_TOKEN not set. Set it to your Kimi token, or add it to ~/.claude/settings.json." >&2
+    echo "ERROR: 未找到 Kimi token。" >&2
+    echo "  请将 token 放入 ~/.claude/settings.json 的 env.ANTHROPIC_AUTH_TOKEN," >&2
+    echo "  或 export ANTHROPIC_AUTH_TOKEN=<你的 Kimi API Key> 后重试。" >&2
+    exit 1
+  fi
+
+  # Onboarding bootstrap (skip login, clean stale model keys). Idempotent.
+  if [[ "$do_bootstrap" -eq 1 ]]; then
+    ccr_kimi_bootstrap || true
+  fi
+
+  # Persist mode: write env block to profile and exit (do not launch claude).
+  if [[ "$persist" -eq 1 ]]; then
+    ccr_kimi_persist_env "$template" "$token"
+    echo "[ccr kimi] 永久模式已配置。新开 shell 后直接运行 'claude' 即可。"
+    return 0
   fi
 
   if [[ "${1:-}" == "resume" ]]; then
@@ -649,14 +772,16 @@ EOF
 
   (
     ccr_unset_routing_env
-    # Load all env keys from the Kimi template.
+    # Load all env keys from the Kimi template (temp, current process only).
     while IFS='=' read -r key val; do
       [[ -z "$key" ]] && continue
+      if [[ "$key" == "ANTHROPIC_AUTH_TOKEN" ]]; then
+        val="$token"
+      fi
       export "$key=$val"
     done < <(jq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$template")
-    if [[ -n "${token}" ]]; then
-      export ANTHROPIC_AUTH_TOKEN="${token}"
-    fi
+    export ANTHROPIC_AUTH_TOKEN="${token}"
+    export ANTHROPIC_API_KEY="${token}"
     ccr_export_cache_prompt_env
     ccr_run_claude "$@"
   )
