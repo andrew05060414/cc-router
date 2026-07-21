@@ -1,0 +1,32 @@
+{
+  "benchmark_meta": {
+    "date": "2026-07-14T15:00:00",
+    "suite": "L1",
+    "profile": "amd_strix_halo",
+    "hardware": {
+      "gpu": "AMD Radeon 8060S (gfx1151)",
+      "count": 1,
+      "vram_gb": 16,
+      "interconnect": "Unified Memory"
+    },
+    "software": {
+      "serving": "vLLM (kyuz0/vllm-therock-gfx1151)",
+      "backend": "ROCm",
+      "dtype": "fp16",
+      "kv_cache": "fp16"
+    },
+    "model": {
+      "name": "Qwen2.5-7B-AWQ",
+      "ctx_len": 4096,
+      "size_category": "7B"
+    },
+    "test": {
+      "ctx": 4096,
+      "max_tokens": 1024,
+      "min_tokens": 1024,
+      "parallel_sweep": [1, 2, 4, 8],
+      "n_per_point": 8,
+      "l1_target_per_user": 15
+    }
+  }
+}

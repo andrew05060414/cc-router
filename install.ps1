@@ -16,6 +16,7 @@ New-Item -ItemType Directory -Path $routerLibDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'scripts\cc.ps1') -Destination (Join-Path $binDir 'cc.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\ccd.ps1') -Destination (Join-Path $binDir 'ccd.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\common.ps1') -Destination (Join-Path $binDir 'common.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $root 'scripts\cc-remote.ps1') -Destination (Join-Path $binDir 'cc-remote.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\lib\cc-config.ps1') -Destination (Join-Path $routerLibDir 'cc-config.ps1') -Force
 if (Test-Path -LiteralPath (Join-Path $root 'config.example.json')) {
   Copy-Item -LiteralPath (Join-Path $root 'config.example.json') -Destination (Join-Path $shareDir 'cc-router\config.example.json') -Force
@@ -31,9 +32,11 @@ if ($AddToProfile) {
   $profileContent = Get-Content -LiteralPath $PROFILE -Raw
   $line1 = "function cc { & '$binDir\cc.ps1' @args }"
   $line2 = "function ccd { & '$binDir\ccd.ps1' @args }"
+  $line3 = "function cc-remote { & '$binDir\cc-remote.ps1' @args }"
   $appendLines = @()
   if ($profileContent -notmatch "function cc \{") { $appendLines += $line1 }
   if ($profileContent -notmatch "function ccd \{") { $appendLines += $line2 }
+  if ($profileContent -notmatch "function cc-remote \{") { $appendLines += $line3 }
   if ($appendLines.Count -gt 0) {
     Add-Content -LiteralPath $PROFILE -Value ("`n{0}`n" -f ($appendLines -join "`n"))
   }
@@ -42,6 +45,7 @@ if ($AddToProfile) {
   Write-Host "Install complete. Add these functions to your profile:" -ForegroundColor Yellow
   Write-Host "function cc { & '$binDir\cc.ps1' @args }"
   Write-Host "function ccd { & '$binDir\ccd.ps1' @args }"
+  Write-Host "function cc-remote { & '$binDir\cc-remote.ps1' @args }"
 }
 
 Write-Host "cc-router config (optional): cc config setup" -ForegroundColor Cyan

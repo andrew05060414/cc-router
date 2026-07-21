@@ -10,6 +10,9 @@ mkdir -p "${BIN_DIR}" "${SHARE_DIR}" "${ROUTER_SHARE}/lib" "${ROUTER_SHARE}/docs
 install -m 755 "${ROOT}/scripts/cc" "${BIN_DIR}/cc"
 install -m 755 "${ROOT}/scripts/ccd" "${BIN_DIR}/ccd"
 install -m 755 "${ROOT}/scripts/ccs" "${BIN_DIR}/ccs"
+if [[ -f "${ROOT}/scripts/cc-remote" ]]; then
+  install -m 755 "${ROOT}/scripts/cc-remote" "${BIN_DIR}/cc-remote"
+fi
 if [[ -f "${ROOT}/scripts/ccd-cache-bench.sh" ]]; then
   install -m 755 "${ROOT}/scripts/ccd-cache-bench.sh" "${BIN_DIR}/ccd-cache-bench"
 fi
@@ -17,7 +20,12 @@ install -m 644 "${ROOT}/scripts/lib/cc-common.sh" "${ROUTER_SHARE}/lib/cc-common
 if [[ -f "${ROOT}/scripts/lib/cc-setup.sh" ]]; then
   install -m 644 "${ROOT}/scripts/lib/cc-setup.sh" "${ROUTER_SHARE}/lib/cc-setup.sh"
 fi
-for doc in SETUP-GUIDE.md SETUP-NOTES.md CCD-CACHE-BENCH.md TODO.md PRODUCT.md; do
+for lib in cc-remote.sh cc-remote-config.sh cc-remote-ssh.sh cc-remote-skills.sh; do
+  if [[ -f "${ROOT}/scripts/lib/${lib}" ]]; then
+    install -m 644 "${ROOT}/scripts/lib/${lib}" "${ROUTER_SHARE}/lib/${lib}"
+  fi
+done
+for doc in SETUP-GUIDE.md SETUP-NOTES.md CCD-CACHE-BENCH.md TODO.md PRODUCT.md CC-REMOTE.md; do
   if [[ -f "${ROOT}/docs/${doc}" ]]; then
     install -m 644 "${ROOT}/docs/${doc}" "${ROUTER_SHARE}/docs/${doc}"
   fi
@@ -36,5 +44,7 @@ echo "First-time (9Router + OAuth + cache-fix): cc setup"
 echo "  → docs also at ${ROUTER_SHARE}/docs/SETUP-GUIDE.md"
 echo "cc-router config (optional): cc config setup"
 echo "  → writes ~/.config/cc-router/config.json"
+echo "Remote onboarding: cc-remote pack && cc-remote setup <host|alias>"
+echo "  → docs at ${ROUTER_SHARE}/docs/CC-REMOTE.md"
 echo "If needed, add ~/.local/bin to PATH:"
 echo '  export PATH="$HOME/.local/bin:$PATH"'

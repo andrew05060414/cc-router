@@ -15,6 +15,9 @@ Most behavior is controlled through `cc setup` and `cc config`, so users can kee
 > **Hitting weird `/context` bloat or other quirks?** See
 > [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md). Planned setup improvements:
 > [`docs/TODO.md`](docs/TODO.md).
+>
+> **Remote server onboarding?** See [`docs/CC-REMOTE.md`](docs/CC-REMOTE.md)
+> and run `cc-remote pack` then `cc-remote setup <host>`.
 
 Supported now:
 
@@ -36,6 +39,16 @@ Use no-profile mode to avoid old profile function interference during validation
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\ccd.ps1" --help
 ```
+
+Remote onboarding from Windows:
+
+```powershell
+cc-remote pack
+cc-remote setup lgsj-h100
+cc-remote ssh lgsj-h100 C:\RemoteProject
+```
+
+See [`docs/CC-REMOTE.md`](docs/CC-REMOTE.md) for details.
 
 ### Linux / WSL
 
@@ -122,6 +135,7 @@ effective env that would be injected.
 - `-9` for 9Router / cache-fix routing
 - `ccs` for CC Switch proxy routing (recommended when no Anthropic account)
 - `ccd` for DeepSeek mode and AI-assisted setup
+- `cc-remote` for one-shot remote server onboarding via SSH/scp
 - `setup`, `config`, and `doctor` for onboarding and diagnostics
 
 `-d` and `-a` are good future alias candidates if you want a more public-facing

@@ -1,0 +1,183 @@
+# ============================================================
+# 通用 LLM 推理性能基准配置
+# 用法: python run_benchmark.py --profile <profile> --suite <L0|L1|L2> [--model <id>] [--ctx <len>]
+# ============================================================
+
+# ------------------------------------------------------------------
+# 硬件/软件栈 Profile（按你的环境选一个）
+# ------------------------------------------------------------------
+profiles:
+  # AMD Strix Halo (Ryzen AI Max 395, gfx1151) - 单机
+  amd_strix_halo:
+    hardware:
+      gpu: "AMD Radeon 8060S (gfx1151)"
+      count: 1
+      vram_gb: 16  # 共享内存，按需分配
+      interconnect: "Unified Memory"
+    software:
+      serving: "vLLM 0.6.3 (kyuz0/vllm-therock-gfx1151)"
+      backend: "CK/ROCm 6.1"
+      dtype: "fp16"
+      kv_cache: "fp16"
+      enforce_eager: true
+      chunked_prefill: false
+      max_num_seqs: 256
+    defaults:
+      ctx: 4096
+      model_path: "/mnt/models/Qwen2.5-7B-AWQ"  # 改成你的模型路径
+      api_base: "http://localhost:8000/v1"
+      tokenizer_path: "/mnt/models/Qwen2.5-7B-AWQ"
+
+  # H100 × 8 × 2 = 16 GPU (双节点 NVLink/NVSwitch)
+  h100_8x2:
+    hardware:
+      gpu: "H100-SXM5-80GB"
+      count: 16
+      nodes: 2
+      gpus_per_node: 8
+      vram_gb: 80
+      interconnect: "NVLink 900 GB/s (intra-node) + NVSwitch (inter-node)"
+    software:
+      serving: "vLLM 0.6.3"
+      backend: "FlashInfer / Triton"
+      dtype: "fp8"
+      kv_cache: "fp8"
+      enforce_eager: false
+      chunked_prefill: true
+      max_num_seqs: 512
+    defaults:
+      ctx: 32768
+      model_path: "/mnt/models/GLM-5.2-FP8"
+      api_base: "http://localhost:8000/v1"
+      tokenizer_path: "/mnt/models/GLM-5.2-FP8"
+
+  # 华为 910B (Atlas 800T A2) - 单机 8 卡
+  huawei_910b:
+    hardware:
+      gpu: "Ascend 910B"
+      count: 8
+      vram_gb: 32
+      interconnect: "HCCS 200 GB/s"
+    software:
+      serving: "vLLM 0.6.3 (Ascend backend)"
+      backend: "CANN 8.0 / MindIE"
+      dtype: "fp16"
+      kv_cache: "fp16"
+      enforce_eager: true
+      chunked_prefill: false
+      max_num_seqs: 256
+    defaults:
+      ctx: 8192
+      model_path: "/mnt/models/Qwen2.5-32B-AWQ"
+      api_base: "http://localhost:8000/v1"
+      tokenizer_path: "/mnt/models/Qwen2.5-32B-AWQ"
+
+  # 通用单机 8 卡 (A100/H100 单节点)
+  generic_8x:
+    hardware:
+      gpu: "A100-80GB / H100-80GB"
+      count: 8
+      vram_gb: 80
+      interconnect: "NVLink 600 GB/s"
+    software:
+      serving: "vLLM 0.6.3"
+      backend: "FlashInfer"
+      dtype: "fp16"
+      kv_cache: "fp16"
+      enforce_eager: false
+      chunked_prefill: true
+      max_num_seqs: 512
+    defaults:
+      ctx: 8192
+      model_path: "/mnt/models/your-model"
+      api_base: "http://localhost:8000/v1"
+      tokenizer_path: "/mnt/models/your-model"
+
+
+# ------------------------------------------------------------------
+# 三套测试套件
+# ------------------------------------------------------------------
+suites:
+  # L0 Smoke: 冒烟测试 - 能不能跑通
+  L0:
+    name: "Smoke Test"
+    description: "验证服务可用、基础吞吐达标"
+    max_duration_min: 10
+    # 固定参数
+    fixed:
+      max_tokens: 256
+      min_tokens: 256
+      temperature: 0.0
+      stream: true
+      n: 4
+    # 并发扫描：仅 p=1
+    parallel: [1]
+    # 成功标准
+    pass_criteria:
+      success_rate: 1.0
+      min_per_user_decode_toks_s: 8  # 基线 80% (假设单卡基线 ~10)
+
+  # L1 SLO: 服务等级目标 - 找并发边界
+  L1:
+    name: "Per-User SLO"
+    description: "找出单用户 decode ≥ 目标值的最大并发数"
+    max_duration_min: 30
+    # 由 --target 指定目标值 (默认按模型规模分档)
+    fixed:
+      temperature: 0.0
+      stream: true
+      n: 8
+    # 并发扫描：1,2,4,8,16... 直到连续 2 档不达标
+    parallel_sweep: [1, 2, 4, 8, 16, 32]
+    # 输出长度 = ctx * 0.25 (4K→1K, 8K→2K, 32K→8K)
+    # min_tokens = max_tokens (防早停)
+    pass_criteria:
+      min_per_user_decode_toks_s: "auto"  # 由 --target 或模型规模决定
+      min_success_rate: 0.95
+
+  # L2 Peak: 系统极限吞吐 - 榨干硬件
+  L2:
+    name: "Peak Throughput"
+    description: "测量总生成吞吐峰值"
+    max_duration_min: 45
+    fixed:
+      temperature: 0.0
+      stream: true
+      n: 8
+    # 并发扫描：大并发压满显存/算力
+    parallel_sweep: [1, 8, 16, 32, 64, 128]
+    # 输出长度 = ctx * 0.5 (4K→2K, 8K→4K, 32K→16K)
+    # min_tokens = max_tokens (长输出，decode 占比 >90%)
+    pass_criteria:
+      report_peak_total_toks_s: true
+      min_success_rate: 0.90
+
+
+# ------------------------------------------------------------------
+# 模型规模 → L1 目标值映射 (可被 --target 覆盖)
+# ------------------------------------------------------------------
+model_slo_targets:
+  "7B": 30
+  "14B": 25
+  "32B": 20
+  "70B": 15
+  "400B": 10  # GLM-5.2 等超大模型
+
+# 从 model_id 推断规模的关键词
+model_size_keywords:
+  7: "7B"
+  14: "14B"
+  32: "32B"
+  70: "70B"
+  400: "400B"
+  5_2: "400B"  # GLM-5.2
+
+
+# ------------------------------------------------------------------
+# 数据集配置
+# ------------------------------------------------------------------
+dataset:
+  type: "random"  # random / sharegpt / custom_jsonl
+  # random 模式下的 prompt 长度范围
+  # 实际 max_prompt_length = ctx - max_tokens - 256 (安全边际)
+  min_prompt_ratio: 0.85  # 最短 prompt = 0.85 * max_prompt_length

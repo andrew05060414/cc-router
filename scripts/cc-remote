@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# cc-remote - 远程服务器一键 onboarding Claude Code
+# =============================================================================
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 加载 cc-router 公共库
+for lib in "${ROOT}/lib/cc-common.sh" "${HOME}/.local/share/cc-router/lib/cc-common.sh"; do
+  if [[ -f "$lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    break
+  fi
+done
+
+# 加载远程相关库
+for lib in "${ROOT}/lib/cc-remote.sh" "${HOME}/.local/share/cc-router/lib/cc-remote.sh"; do
+  if [[ -f "$lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    break
+  fi
+done
+
+for lib in "${ROOT}/lib/cc-remote-config.sh" "${HOME}/.local/share/cc-router/lib/cc-remote-config.sh"; do
+  if [[ -f "$lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    break
+  fi
+done
+
+for lib in "${ROOT}/lib/cc-remote-ssh.sh" "${HOME}/.local/share/cc-router/lib/cc-remote-ssh.sh"; do
+  if [[ -f "$lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    break
+  fi
+done
+
+for lib in "${ROOT}/lib/cc-remote-skills.sh" "${HOME}/.local/share/cc-router/lib/cc-remote-skills.sh"; do
+  if [[ -f "$lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    break
+  fi
+done
+
+show_help() {
+  cat <<'EOF'
+cc-remote - 远程服务器 Claude Code 一键 onboarding
+
+用法:
+  cc-remote pack [--platforms linux-x64,linux-arm64] [--skip-download]
+  cc-remote setup <host|alias>
+  cc-remote sync <host|alias>
+  cc-remote ssh <host|alias> [claude args...]
+  cc-remote config show
+  cc-remote skills
+  cc-remote ssh-config add <alias> <host> [user] [port] [key]
+  cc-remote ssh-config list
+  cc-remote doctor <host|alias>
+
+Windows 用户：使用 cc-remote.ps1，命令相同。
+
+环境变量:
+  CC_REMOTE_SETTINGS_MODE=local|remote|default
+  CC_REMOTE_PACK_DIR=~/.local/share/cc-router/remote-pack
+  CC_REMOTE_SYNC_SKILLS=0|1
+  CC_REMOTE_AUTH_TOKEN=<ANTHROPIC_AUTH_TOKEN>
+
+说明:
+  - remote 模式默认从本机 ~/.claude/settings.json 读取 ANTHROPIC_AUTH_TOKEN
+  - 如果本地没有 token，可设置 CC_REMOTE_AUTH_TOKEN 环境变量
+  - 默认模板（default 模式）不携带 token，适合手动在远程配置
+
+示例:
+  cc-remote pack
+  cc-remote setup lgsj-h100
+  cc-remote ssh lgsj-h100 /path/to/project
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+
+  case "$cmd" in
+    -h|--help|help)
+      show_help
+      ;;
+
+    pack)
+      cc_remote_pack "$@"
+      ;;
+
+    setup)
+      local host="${1:-}"
+      if [[ -z "$host" ]]; then
+        echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+        echo "用法: cc-remote setup <host|alias>" >&2
+        exit 1
+      fi
+      cc_remote_setup "$host"
+      ;;
+
+    sync)
+      local host="${1:-}"
+      if [[ -z "$host" ]]; then
+        echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+        exit 1
+      fi
+      cc_remote_sync "$host"
+      ;;
+
+    ssh|connect)
+      local host="${1:-}"
+      if [[ -z "$host" ]]; then
+        echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+        exit 1
+      fi
+      shift
+      cc_remote_ssh "$host" "$@"
+      ;;
+
+    config)
+      local subcmd="${1:-generate}"
+      shift || true
+      case "$subcmd" in
+        generate|gen|""|show)
+          cc_remote_config_generate
+          ;;
+        *)
+          echo "ERROR: 未知 config 子命令: $subcmd" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+
+    skills)
+      cc_remote_skills_select
+      ;;
+
+    ssh-config)
+      local subcmd="${1:-list}"
+      shift || true
+      case "$subcmd" in
+        add)
+          cc_remote_ssh_config_add "$@"
+          ;;
+        list|ls)
+          cc_remote_ssh_config_list
+          ;;
+        *)
+          echo "ERROR: 未知 ssh-config 子命令: $subcmd" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+
+    doctor)
+      local host="${1:-}"
+      if [[ -z "$host" ]]; then
+        echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+        exit 1
+      fi
+      cc_remote_doctor "$host"
+      ;;
+
+    *)
+      echo "ERROR: 未知命令: $cmd" >&2
+      show_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
