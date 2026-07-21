@@ -253,11 +253,15 @@ ccr_remote_probe_speed() {
 }
 
 ccr_remote_install() {
-  local input="" verbose=0
+  local input="" verbose=0 dry_run=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -v|--verbose)
         verbose=1
+        shift
+        ;;
+      -n|--dry-run)
+        dry_run=1
         shift
         ;;
       -h|--help)
@@ -265,18 +269,18 @@ ccr_remote_install() {
 ccr remote install - Install ccr itself on a remote host via SSH
 
 Usage:
-  ccr remote install [-v|--verbose] <host|alias>
+  ccr remote install [-v|--verbose] [-n|--dry-run] <host|alias>
 
 Examples:
   ccr remote install Nas-2b
   ccr remote install --verbose Nas-2b
-  ccr remote install Nas-2b -v
+  ccr remote install --dry-run Nas-2b
 EOF
         return 0
         ;;
       -*)
         echo "ERROR: 未知选项: $1" >&2
-        echo "用法: ccr remote install [-v|--verbose] <host|alias>" >&2
+        echo "用法: ccr remote install [-v|--verbose] [-n|--dry-run] <host|alias>" >&2
         return 2
         ;;
       *)
@@ -293,7 +297,7 @@ EOF
 
   if [[ -z "$input" ]]; then
     echo "ERROR: 请指定远程主机或 SSH 别名" >&2
-    echo "用法: ccr remote install [-v|--verbose] <host|alias>" >&2
+    echo "用法: ccr remote install [-v|--verbose] [-n|--dry-run] <host|alias>" >&2
     return 1
   fi
 
@@ -305,6 +309,28 @@ EOF
   target="$(ccr_remote_ssh_target "$input")"
   local install_dir="/tmp/cc-router-install"
   local repo_url="${CC_REMOTE_INSTALL_URL:-}"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[ccr remote install --dry-run] 目标主机: $target"
+    local local_repo="${CC_ROUTER_REPO_DIR:-}"
+    if [[ -z "$local_repo" ]]; then
+      local_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    fi
+    echo "[ccr remote install --dry-run] 本地仓库路径: $local_repo"
+    echo "[ccr remote install --dry-run] 远端安装目录: $install_dir"
+    if [[ -n "$repo_url" ]]; then
+      echo "[ccr remote install --dry-run] 探测远端网络速度: $repo_url"
+      echo "[ccr remote install --dry-run] 若速度 < 4s 则使用 curl 直接下载，否则 SSH 推送"
+    else
+      echo "[ccr remote install --dry-run] 无 CC_REMOTE_INSTALL_URL，将通过 SSH 推送本地仓库"
+    fi
+    echo "[ccr remote install --dry-run] 将要执行的 SSH 命令:"
+    echo "  ssh $target 'rm -rf $install_dir && mkdir -p $install_dir'"
+    echo "  tar -czf - --exclude='.git' --exclude='.codegraph' --exclude='remote-pack' -C \"$local_repo\" . | ssh $target 'tar -xzf - -C $install_dir'"
+    echo "  ssh $target 'bash $install_dir/install.sh'"
+    echo "[ccr remote install --dry-run] 结束（未执行任何操作）"
+    return 0
+  fi
 
   echo "[ccr remote install] 目标主机: $target"
 

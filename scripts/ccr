@@ -11,7 +11,15 @@ while [[ -L "${_ccr_script_path}" ]]; do
   fi
 done
 _ccr_script_dir="$(cd "$(dirname "${_ccr_script_path}")" && pwd)"
-export CC_ROUTER_REPO_DIR="$(cd "${_ccr_script_dir}/.." && pwd)"
+
+# Resolve the payload repo root for `ccr remote install`:
+#   - Running from a source checkout (scripts/../install.sh exists) → that checkout root.
+#   - Installed (~/.local/bin/ccr) → the share dir, which install.sh fills with the payload.
+CC_ROUTER_REPO_DIR="$(cd "${_ccr_script_dir}/.." && pwd)"
+if [[ ! -f "${CC_ROUTER_REPO_DIR}/install.sh" && -f "${HOME}/.local/share/cc-router/install.sh" ]]; then
+  CC_ROUTER_REPO_DIR="${HOME}/.local/share/cc-router"
+fi
+export CC_ROUTER_REPO_DIR
 
 _ccr_load_lib() {
   local name="$1"
