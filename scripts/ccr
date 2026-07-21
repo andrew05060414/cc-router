@@ -211,6 +211,7 @@ ccr_run_deepseek() {
   export ANTHROPIC_AUTH_TOKEN="${DEEPSEEK_API_KEY}"
   export ANTHROPIC_MODEL="${model}"
   export ANTHROPIC_DEFAULT_OPUS_MODEL="${model}"
+  export ANTHROPIC_DEFAULT_FABLE_MODEL="${model}"
   export ANTHROPIC_DEFAULT_SONNET_MODEL="${model}"
   export ANTHROPIC_DEFAULT_HAIKU_MODEL="${haiku_model}"
   export CLAUDE_CODE_SUBAGENT_MODEL="${haiku_model}"
