@@ -4,7 +4,28 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 SHARE_DIR="${HOME}/.local/share/cc-router"
-mkdir -p "${BIN_DIR}" "${SHARE_DIR}/lib" "${SHARE_DIR}/docs" "${SHARE_DIR}/templates/remote" "${SHARE_DIR}/remote-pack"
+mkdir -p "${BIN_DIR}" "${SHARE_DIR}/lib" "${SHARE_DIR}/docs" "${SHARE_DIR}/templates/remote"
+
+# The share dir doubles as the payload pushed by `ccr remote install`; remove the
+# local remote-pack staging dir so it is never tarred up recursively.
+rm -rf "${SHARE_DIR}/remote-pack"
+
+# Self-install so the share dir is a runnable checkout (needed by `ccr remote install`).
+install -m 755 "${ROOT}/install.sh" "${SHARE_DIR}/install.sh"
+
+# Mirror scripts/ and docs/ into the share dir so it is a self-contained checkout:
+# install.sh (above) resolves ROOT=share dir on the remote and expects
+# ${ROOT}/scripts/ccr and ${ROOT}/docs/dramatic-prompt.md to exist.
+mkdir -p "${SHARE_DIR}/scripts"
+if [[ -d "${ROOT}/scripts" ]]; then
+  rsync -a --delete \
+    --exclude='test' \
+    "${ROOT}/scripts/" "${SHARE_DIR}/scripts/"
+fi
+if [[ -d "${ROOT}/docs" ]]; then
+  mkdir -p "${SHARE_DIR}/docs"
+  rsync -a "${ROOT}/docs/" "${SHARE_DIR}/docs/"
+fi
 
 # Migrate old ccdeepseek share dir if present.
 OLD_SHARE_DIR="${HOME}/.local/share/ccdeepseek"
