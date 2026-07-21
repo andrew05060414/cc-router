@@ -115,7 +115,8 @@ ccr_remote_config_from_local() {
     return
   fi
 
-  # 提取关键字段
+  # 提取关键字段。保留 ANTHROPIC_MODEL 与 ANTHROPIC_DEFAULT_*（官方 kimi coding
+  # 接入需要档位映射，确保子 agent 的 Haiku 档也可用）；遥测/tool-use 开关同样保留。
   jq '
   {
     env: (
@@ -126,7 +127,6 @@ ccr_remote_config_from_local() {
     git: {
       includeCoAuthor: (.git.includeCoAuthor // false)
     },
-    model: (.model // "opus"),
     skipDangerousModePermissionPrompt: (.skipDangerousModePermissionPrompt // true)
   }' "$local_settings" > "$output"
 
