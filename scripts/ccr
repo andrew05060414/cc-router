@@ -11,6 +11,7 @@ while [[ -L "${_ccr_script_path}" ]]; do
   fi
 done
 _ccr_script_dir="$(cd "$(dirname "${_ccr_script_path}")" && pwd)"
+export CC_ROUTER_REPO_DIR="$(cd "${_ccr_script_dir}/.." && pwd)"
 
 _ccr_load_lib() {
   local name="$1"

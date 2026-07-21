@@ -235,7 +235,7 @@ EOF
 # ------------------------------- 远程 ccr 自身安装 -------------------------------
 
 ccr_remote_install_repo_dir() {
-  printf '%s\n' "${CC_REMOTE_INSTALL_REPO_DIR:-${HOME}/.local/share/cc-router/install-repo}}"
+  printf '%s\n' "${CC_REMOTE_INSTALL_REPO_DIR:-${HOME}/.local/share/cc-router/install-repo}"
 }
 
 ccr_remote_probe_speed() {
@@ -253,7 +253,54 @@ ccr_remote_probe_speed() {
 }
 
 ccr_remote_install() {
-  local input="$1"
+  local input="" verbose=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose)
+        verbose=1
+        shift
+        ;;
+      -h|--help)
+        cat <<'EOF'
+ccr remote install - Install ccr itself on a remote host via SSH
+
+Usage:
+  ccr remote install [-v|--verbose] <host|alias>
+
+Examples:
+  ccr remote install Nas-2b
+  ccr remote install --verbose Nas-2b
+  ccr remote install Nas-2b -v
+EOF
+        return 0
+        ;;
+      -*)
+        echo "ERROR: 未知选项: $1" >&2
+        echo "用法: ccr remote install [-v|--verbose] <host|alias>" >&2
+        return 2
+        ;;
+      *)
+        if [[ -z "$input" ]]; then
+          input="$1"
+          shift
+        else
+          echo "ERROR: 只能指定一个主机参数" >&2
+          return 2
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$input" ]]; then
+    echo "ERROR: 请指定远程主机或 SSH 别名" >&2
+    echo "用法: ccr remote install [-v|--verbose] <host|alias>" >&2
+    return 1
+  fi
+
+  if [[ "$verbose" -eq 1 ]]; then
+    export CCR_VERBOSE=1
+  fi
+
   local target
   target="$(ccr_remote_ssh_target "$input")"
   local install_dir="/tmp/cc-router-install"
@@ -286,8 +333,16 @@ ccr_remote_install() {
     "
   else
     echo "[ccr remote install] 使用 SSH 推送本地仓库..."
-    local local_repo
-    local_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." \&\& pwd)"
+    local local_repo="${CC_ROUTER_REPO_DIR:-}"
+    if [[ -z "$local_repo" ]]; then
+      local_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    fi
+
+    if [[ -n "${CCR_VERBOSE:-}" ]]; then
+      echo "[ccr remote install] 本地仓库路径: $local_repo"
+      echo "[ccr remote install] 远端安装目录: $install_dir"
+      echo "[ccr remote install] tar 命令: tar -czf - --exclude='.git' --exclude='.codegraph' --exclude='remote-pack' -C \"$local_repo\" ."
+    fi
 
     ccr_remote_ssh_exec "$target" "rm -rf ${install_dir} && mkdir -p ${install_dir}"
     # Exclude git history and pack files to keep the transfer small.
