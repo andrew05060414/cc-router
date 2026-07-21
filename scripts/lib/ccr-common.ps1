@@ -82,9 +82,9 @@ function Get-DeepSeekToken {
 }
 
 $configCandidates = @(
-  (Join-Path $PSScriptRoot 'lib\cc-config.ps1')
-  (Join-Path $HOME '.ccdeepseek\share\cc-router\lib\cc-config.ps1')
-  (Join-Path $HOME '.local\share\cc-router\lib\cc-config.ps1')
+  (Join-Path $PSScriptRoot 'ccr-config.ps1')
+  (Join-Path $PSScriptRoot 'lib\ccr-config.ps1')
+  (Join-Path $HOME '.local\share\cc-router\lib\ccr-config.ps1')
 )
 foreach ($cfgPath in $configCandidates) {
   if (Test-Path -LiteralPath $cfgPath) {
