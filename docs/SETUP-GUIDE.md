@@ -1,7 +1,7 @@
 # cc-router full stack setup guide
 
 This guide explains **why** the stack has several moving parts, **how** they connect,
-and **what to run once** so `cc`, `cc -9`, and `ccd` work reliably. For debugging
+and **what to run once** so `ccr`, `ccr -9`, and `ccr deepseek` work reliably. For debugging
 symptoms after setup, see [SETUP-NOTES.md](SETUP-NOTES.md).
 
 ---
@@ -17,12 +17,12 @@ Most cc-router users who hit quota limits on official Anthropic want:
 cc-router is only the **launcher**: it sets env vars, optional config in
 `~/.config/cc-router/config.json`, and runs `claude` with the right routing.
 
-### End-to-end diagram (`cc -9` with defaults)
+### End-to-end diagram (`ccr -9` with defaults)
 
 ```text
 ┌─────────────────┐
 │  Claude Code    │  You type here; builds /v1/messages JSON
-│  (cc -9)        │
+│  (ccr 9router)        │
 └────────┬────────┘
          │ ANTHROPIC_BASE_URL=http://127.0.0.1:9801/v1
          │ ANTHROPIC_AUTH_TOKEN=<NINEROUTER_KEY>
@@ -43,11 +43,11 @@ cc-router is only the **launcher**: it sets env vars, optional config in
    Anthropic OAuth / Kiro / other providers
 ```
 
-**Official `cc`** (subscription direct): same cache-fix on `:9801`, upstream defaults to
+**Official `ccr`** (subscription direct): same cache-fix on `:9801`, upstream defaults to
 `https://api.anthropic.com` (no 9Router).
 
-**`ccd`** (DeepSeek): skips cache-fix and 9Router; uses `api.deepseek.com/anthropic`.
-See [CCD-CACHE-BENCH.md](CCD-CACHE-BENCH.md) for cache verification there.
+**`ccr deepseek`** (DeepSeek): skips cache-fix and 9Router; uses `api.deepseek.com/anthropic`.
+See [CR-CACHE-BENCH.md](CR-CACHE-BENCH.md) for cache verification there.
 
 ---
 
@@ -140,12 +140,12 @@ export NINEROUTER_KEY=your-9router-api-key
 curl -fsS http://127.0.0.1:20128/api/health
 ```
 
-### 3. Install npm dependencies (required for default `cc -9`)
+### 3. Install npm dependencies (required for default `ccr -9`)
 
 cc-router can install these for you:
 
 ```bash
-cc setup install-deps
+ccr setup install-deps
 ```
 
 That runs (when missing):
@@ -153,15 +153,15 @@ That runs (when missing):
 - `npm install -g @anthropic-ai/claude-code` — Claude Code CLI
 - `npm install -g claude-code-cache-fix` — local cache-fix proxy
 
-On `cc -9`, if packages are missing and your terminal is interactive, you’ll be **prompted** to install (skip with `CC_ROUTER_NO_INSTALL_PROMPT=1`).
+On `ccr -9`, if packages are missing and your terminal is interactive, you’ll be **prompted** to install (skip with `CC_ROUTER_NO_INSTALL_PROMPT=1`).
 
-### 4. Start cache-fix (required for default `cc -9`)
+### 4. Start cache-fix (required for default `ccr -9`)
 
 **Important:** Start cache-fix **after** 9Router is up, with **upstream = 9Router**:
 
 ```bash
 # if not already installed:
-cc setup install-deps
+ccr setup install-deps
 # or: npm install -g claude-code-cache-fix
 
 export CACHE_FIX_PROXY_UPSTREAM=http://127.0.0.1:20128
@@ -194,28 +194,28 @@ New installs use `config.example.json` defaults:
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `cachePromptEnvEnabled` | `true` | Attribution + git env |
-| `cacheFix9routerEnabled` | `true` | `cc -9` → cache-fix → 9Router |
-| `cacheFixEnabled` | `true` | `cc` → cache-fix → Anthropic |
+| `cacheFix9routerEnabled` | `true` | `ccr -9` → cache-fix → 9Router |
+| `cacheFixEnabled` | `true` | `ccr` → cache-fix → Anthropic |
 | `cacheFixUrl` | `http://127.0.0.1:9801` | cache-fix listen URL |
 | `nineRouterUrl` | `http://127.0.0.1:20128` | Fallback if `NINEROUTER_URL` unset |
 
 ```bash
-cc config show
-cc config setup          # optional: permissions / bypass prompts
+ccr config show
+ccr config setup          # optional: permissions / bypass prompts
 ```
 
 If you have an **old** `config.json` with `"cacheFixEnabled": false`, run:
 
 ```bash
-cc config set cacheFixEnabled on
-cc config set cacheFix9routerEnabled on
+ccr config set cacheFixEnabled on
+ccr config set cacheFix9routerEnabled on
 ```
 
 ### 6. Verify
 
 ```bash
-cc -9 doctor
-cc -9 doctor detail
+ccr 9router doctor
+ccr 9router doctor detail
 ```
 
 Healthy summary:
@@ -228,20 +228,20 @@ Healthy summary:
 Start a session:
 
 ```bash
-cc -9
+ccr 9router
 ```
 
 Inside CC: `/context` after `hi` — Messages bucket should stay modest if MCP deferred loading works (see SETUP-NOTES §1).
 
 ---
 
-## What cc-router sets on launch (`cc -9`)
+## What cc-router sets on launch (`ccr -9`)
 
 | Variable | Typical value | Set by |
 |----------|---------------|--------|
 | `ANTHROPIC_BASE_URL` | `http://127.0.0.1:9801/v1` | cc-router (`cacheFix9routerEnabled`) |
 | `ANTHROPIC_AUTH_TOKEN` | `NINEROUTER_KEY` | cc-router |
-| `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*` | `cc-normal`, `cc-pro`, `cc-lite` | cc-router (overridable via `NINEROUTER_*_MODEL`) |
+| `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*` | `ccr-normal`, `ccr-pro`, `ccr-lite` | cc-router (overridable via `NINEROUTER_*_MODEL`) |
 | `ENABLE_TOOL_SEARCH` | `true` | cc-router |
 | `CLAUDE_CODE_ATTRIBUTION_HEADER` | `false` | cc-router |
 | `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | `1` | cc-router |
@@ -254,12 +254,12 @@ You do **not** set `NINEROUTER_URL` to `9801`; cc-router points CC at cache-fix 
 
 1. Ensure **9Router** is running (`curl …/api/health`).
 2. Ensure **cache-fix** is running (`curl http://127.0.0.1:9801/health`).
-3. `cc -9` (or `cc` for official-only path).
+3. `ccr -9` (or `ccr` for official-only path).
 
 Quick check command:
 
 ```bash
-cc setup check
+ccr setup check
 ```
 
 (See [TODO.md](TODO.md) for planned improvements to this command.)
@@ -270,9 +270,9 @@ cc setup check
 
 | Goal | Command |
 |------|---------|
-| `cc -9` direct to 9Router (no cache-fix) | `cc config set cacheFix9routerEnabled off` |
-| Official `cc` direct to Anthropic | `cc config set cacheFixEnabled off` |
-| Stop attribution/git env injection | `cc config set cachePromptEnvEnabled off` |
+| `ccr -9` direct to 9Router (no cache-fix) | `ccr config set cacheFix9routerEnabled off` |
+| Official `ccr` direct to Anthropic | `ccr config set cacheFixEnabled off` |
+| Stop attribution/git env injection | `ccr config set cachePromptEnvEnabled off` |
 | Disable MCP deferred loading (debug only) | `export NINEROUTER_TOOL_SEARCH=` then new shell |
 
 ---
@@ -283,12 +283,12 @@ cc setup check
 |---------|--------------|-----|
 | `curl :9801` fails right after `node … &` | Race: proxy not listening yet | Wait/retry loop; see §3 |
 | `curl :9801` always fails | cache-fix not running | Start with `CACHE_FIX_PROXY_UPSTREAM` set |
-| `cc -9` works but cache still expensive | cache-fix down or `cacheFix9routerEnabled off` | `cc -9 doctor`; start proxy |
+| `ccr -9` works but cache still expensive | cache-fix down or `cacheFix9routerEnabled off` | `ccr -9 doctor`; start proxy |
 | 9Router errors upstream | OAuth expired / wrong model alias | 9Router dashboard |
-| `/context` 30%+ on `hi` | `ENABLE_TOOL_SEARCH` off or 9Router strips `tool_reference` | `cc -9 doctor detail` §4–5 |
-| Official `cc` broken with cache-fix on | cache-fix upstream still pointing at 20128 | Run **two** processes or one process with upstream switched—official needs default Anthropic upstream; use separate terminal profiles or install-service env |
+| `/context` 30%+ on `hi` | `ENABLE_TOOL_SEARCH` off or 9Router strips `tool_reference` | `ccr -9 doctor detail` §4–5 |
+| Official `ccr` broken with cache-fix on | cache-fix upstream still pointing at 20128 | Run **two** processes or one process with upstream switched—official needs default Anthropic upstream; use separate terminal profiles or install-service env |
 
-**Running official `cc` and `cc -9` at the same time:** one cache-fix process can only have **one**
+**Running official `ccr` and `ccr -9` at the same time:** one cache-fix process can only have **one**
 `CACHE_FIX_PROXY_UPSTREAM`. For simultaneous use you need either:
 
 - Two cache-fix instances on different ports (advanced), or
@@ -300,6 +300,6 @@ cc setup check
 ## Related docs
 
 - [SETUP-NOTES.md](SETUP-NOTES.md) — MCP bloat, model aliases, diagnosis cheat sheet
-- [CCD-CACHE-BENCH.md](CCD-CACHE-BENCH.md) — DeepSeek cache bench
+- [CR-CACHE-BENCH.md](CR-CACHE-BENCH.md) — DeepSeek cache bench
 - [9ROUTER-CACHE-RESEARCH.md](9ROUTER-CACHE-RESEARCH.md) — what 9Router does vs cache-fix
 - [TODO.md](TODO.md) — planned setup CLI improvements

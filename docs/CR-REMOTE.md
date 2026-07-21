@@ -1,6 +1,6 @@
-# cc-remote - 远程服务器 Claude Code 一键 onboarding
+# ccr remote - 远程服务器 Claude Code 一键 onboarding
 
-`cc-remote` 让你在本机打包 Claude Code 安装包、配置和技能，然后通过 SSH 一键部署到远程 Linux/Windows 服务器。核心理念：**尽量通过 scp 从本机传，避免在远程从外网下载**。
+`ccr-remote` 让你在本机打包 Claude Code 安装包、配置和技能，然后通过 SSH 一键部署到远程 Linux/Windows 服务器。核心理念：**尽量通过 scp 从本机传，避免在远程从外网下载**。
 
 ## 为什么需要这个
 
@@ -31,16 +31,16 @@ cd C:\path\to\cc-router
 . $PROFILE
 ```
 
-Windows 上的命令是 `cc-remote`（通过 `cc-remote.ps1`），用法和 Linux/macOS 基本一致。
+Windows 上的命令是 `ccr-remote`（通过 `ccr-remote.ps1`），用法和 Linux/macOS 基本一致。
 
-> Windows 上命令相同，使用 `cc-remote`（通过 `cc-remote.ps1`）。路径用 Windows 格式，如 `C:\RemoteProject`。
+> Windows 上命令相同，使用 `ccr-remote`（通过 `ccr-remote.ps1`）。路径用 Windows 格式，如 `C:\RemoteProject`。
 
 ## 快速开始
 
 ### 1. 本机打包
 
 ```bash
-cc-remote pack
+ccr remote pack
 ```
 
 这会：
@@ -53,13 +53,13 @@ cc-remote pack
 
 ```bash
 # 只下 Linux x64
-cc-remote pack --platforms linux-x64
+ccr remote pack --platforms linux-x64
 
 # Linux + Windows
-cc-remote pack --platforms linux-x64,linux-arm64,win32-x64
+ccr remote pack --platforms linux-x64,linux-arm64,win32-x64
 
 # 使用已下载好的包，不再重新 npm pack
-cc-remote pack --skip-download
+ccr remote pack --skip-download
 ```
 
 打包目录：`~/.local/share/cc-router/remote-pack/`
@@ -68,17 +68,17 @@ cc-remote pack --skip-download
 
 ```bash
 # 通过用户名+主机
-cc-remote setup user@192.168.1.100
+ccr remote setup user@192.168.1.100
 
 # 或者先配置 ssh 别名
-cc-remote ssh-config add lgsj-h100 192.168.1.100 lgsj 22 ~/.ssh/id_rsa
-cc-remote setup lgsj-h100
+ccr remote ssh-config add lgsj-h100 192.168.1.100 lgsj 22 ~/.ssh/id_rsa
+ccr remote setup lgsj-h100
 ```
 
 ### 3. 部署到远程
 
 ```bash
-cc-remote setup lgsj-h100
+ccr remote setup lgsj-h100
 ```
 
 流程：
@@ -91,13 +91,13 @@ cc-remote setup lgsj-h100
 
 ```bash
 # 直接启动
-cc-remote ssh lgsj-h100
+ccr remote ssh lgsj-h100
 
 # 进入项目目录后启动
-cc-remote ssh lgsj-h100 /home/lgsj/my-project
+ccr remote ssh lgsj-h100 /home/lgsj/my-project
 
 # 带参数
-cc-remote ssh lgsj-h100 /home/lgsj/my-project --model sonnet
+ccr remote ssh lgsj-h100 /home/lgsj/my-project --model sonnet
 ```
 
 ### 5. 只同步配置
@@ -105,7 +105,7 @@ cc-remote ssh lgsj-h100 /home/lgsj/my-project --model sonnet
 如果你只改了 settings 或技能，不想重装：
 
 ```bash
-cc-remote sync lgsj-h100
+ccr remote sync lgsj-h100
 ```
 
 ## settings.json 模式
@@ -114,19 +114,19 @@ cc-remote sync lgsj-h100
 
 ```bash
 # 默认：kimi coding plan + 关闭遥测
-CC_REMOTE_SETTINGS_MODE=remote cc-remote pack
+CC_REMOTE_SETTINGS_MODE=remote ccr remote pack
 
 # 从本地 settings.json 提取关键字段（需要 jq）
-CC_REMOTE_SETTINGS_MODE=local cc-remote pack
+CC_REMOTE_SETTINGS_MODE=local ccr remote pack
 
 # 最精简默认模板
-CC_REMOTE_SETTINGS_MODE=default cc-remote pack
+CC_REMOTE_SETTINGS_MODE=default ccr remote pack
 ```
 
 也可以单独预览生成的 settings：
 
 ```bash
-cc-remote config show
+ccr remote config show
 ```
 
 ## 技能包管理
@@ -140,7 +140,7 @@ cc-remote config show
 如需调整同步的技能：
 
 ```bash
-cc-remote skills
+ccr remote skills
 ```
 
 会列出：
@@ -154,17 +154,17 @@ cc-remote skills
 
 | 命令 | 说明 |
 |------|------|
-| `cc-remote pack` | 本机预下载和打包 |
-| `cc-remote setup <host>` | 全量部署 |
-| `cc-remote sync <host>` | 只同步配置和技能 |
-| `cc-remote ssh <host> [dir] [args]` | SSH 并启动 Claude Code |
+| `ccr-remote pack` | 本机预下载和打包 |
+| `ccr-remote setup <host>` | 全量部署 |
+| `ccr-remote sync <host>` | 只同步配置和技能 |
+| `ccr-remote ssh <host> [dir] [args]` | SSH 并启动 Claude Code |
 
 Windows 命令相同，路径用 `C:\project` 格式。
-| `cc-remote config show` | 预览远程版 settings |
-| `cc-remote skills` | 选择技能包 |
-| `cc-remote ssh-config add <alias> <host> [user] [port] [key]` | 添加 SSH 别名 |
-| `cc-remote ssh-config list` | 列出 SSH 配置 |
-| `cc-remote doctor <host>` | 检查远程环境 |
+| `ccr-remote config show` | 预览远程版 settings |
+| `ccr-remote skills` | 选择技能包 |
+| `ccr-remote ssh-config add <alias> <host> [user] [port] [key]` | 添加 SSH 别名 |
+| `ccr-remote ssh-config list` | 列出 SSH 配置 |
+| `ccr-remote doctor <host>` | 检查远程环境 |
 
 ## 环境变量
 

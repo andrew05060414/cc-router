@@ -1,13 +1,13 @@
 # Dramatic Prompt: cc-router 一键引导
 
 > 把 `===== BEGIN =====` 到 `===== END =====` 之间的整段内容复制粘贴给任意一个能执行 shell 的 AI Coding Agent
-> （Claude Code / Codex / Cursor Agent / Aider 等），让它替你完成 `ccd` 的检测、安装、配置与首次运行。
+> （Claude Code / Codex / Cursor Agent / Aider 等），让它替你完成 `ccr deepseek` 的检测、安装、配置与首次运行。
 
 ---
 
 ## 这个模板是干什么的
 
-`cc-router` 自带的 `install.sh` / `install.ps1` 已经够轻量了，但是新用户依然会卡在：
+`ccr-router` 自带的 `install.sh` / `install.ps1` 已经够轻量了，但是新用户依然会卡在：
 
 - 不知道当前系统该走哪条路径
 - Node / `@anthropic-ai/claude-code` 没装好
@@ -15,7 +15,7 @@
 - `~/.local/bin` 不在 `PATH` 里
 - 老的 `ANTHROPIC_*` 环境变量留在 shell 里污染路由
 
-这个 "dramatic prompt" 的目标是：**把上面所有踩坑步骤打包成一份能直接喂给 AI 的剧本**，让 AI 在你的真实终端里按顺序探测、确认、执行，最后给你一个 `ccd doctor` 通过的环境。
+这个 "dramatic prompt" 的目标是：**把上面所有踩坑步骤打包成一份能直接喂给 AI 的剧本**，让 AI 在你的真实终端里按顺序探测、确认、执行，最后给你一个 `ccr deepseek doctor` 通过的环境。
 
 ---
 
@@ -30,10 +30,10 @@
 终端里直接拿到这段 prompt：
 
 ```bash
-ccd prompt --print-prompt | less          # 浏览
-ccd prompt --print-prompt | xclip -selection clipboard   # Linux 复制到剪贴板
-ccd prompt --print-prompt | pbcopy                       # macOS 复制到剪贴板
-ccd prompt --print-prompt | clip.exe                     # Windows / WSL 复制到剪贴板
+ccr deepseek prompt --print-prompt | less          # 浏览
+ccr deepseek prompt --print-prompt | xclip -selection clipboard   # Linux 复制到剪贴板
+ccr deepseek prompt --print-prompt | pbcopy                       # macOS 复制到剪贴板
+ccr deepseek prompt --print-prompt | clip.exe                     # Windows / WSL 复制到剪贴板
 ```
 
 ---
@@ -43,14 +43,14 @@ ccd prompt --print-prompt | clip.exe                     # Windows / WSL 复制�
 # 角色
 
 你是一名熟悉跨平台终端（Windows PowerShell / Linux bash / WSL / macOS zsh+bash）的资深运维工程师。
-本次任务：把 `cc-router` 的 `ccd` 命令在我当前这台机器上跑通。
+本次任务：把 `ccr-router` 的 `ccr deepseek` 命令在我当前这台机器上跑通。
 
 # 项目背景（PROJECT_CONTEXT）
 
-`cc-router` 提供两个轻量启动器，避免官方 Claude 与 DeepSeek 路由共用一个 shell 时互相污染：
+`ccr-router` 提供两个轻量启动器，避免官方 Claude 与 DeepSeek 路由共用一个 shell 时互相污染：
 
-- `cc`：官方 Claude 模式（启动前清理 DeepSeek 相关环境变量）
-- `ccd`：DeepSeek 路由模式（注入 Anthropic 兼容的 DeepSeek 环境变量后启动 `claude`）
+- `ccr`：官方 Claude 模式（启动前清理 DeepSeek 相关环境变量）
+- `ccr deepseek`：DeepSeek 路由模式（注入 Anthropic 兼容的 DeepSeek 环境变量后启动 `claude`）
 
 仓库地址：<在此填入仓库地址，例如 https://github.com/your-name/cc-router>
 我的本地仓库路径（如果已 clone）：<在此填入本地路径或写 "尚未 clone">
@@ -60,8 +60,8 @@ ccd prompt --print-prompt | clip.exe                     # Windows / WSL 复制�
 1. 确认依赖：Node.js + `@anthropic-ai/claude-code` 是否就绪；缺什么就给我**精确**的安装命令。
 2. 根据我的操作系统选择正确入口（`install.sh` 或 `install.ps1`）并完成安装。
 3. 把 `DEEPSEEK_API_KEY` 注入当前 shell；如果我点头，再写入对应的 profile / rc 文件做持久化。
-4. 跑一次 `ccd doctor`，确认 OK。
-5. 给我最少够用的"以后怎么用"示例：`ccd`、`ccd resume`、`ccd --model`、`ccd prompt`。
+4. 跑一次 `ccr deepseek doctor`，确认 OK。
+5. 给我最少够用的"以后怎么用"示例：`ccr deepseek`、`ccr deepseek resume`、`ccr deepseek --model`、`ccr deepseek prompt`。
 
 # 约束（CONSTRAINTS）
 
@@ -85,7 +85,7 @@ ccd prompt --print-prompt | clip.exe                     # Windows / WSL 复制�
 | npm | `npm -v` | `npm -v` |
 | claude CLI | `command -v claude` | `Get-Command claude -ErrorAction SilentlyContinue` |
 | 残留 ANTHROPIC_* | `env \| grep -E '^ANTHROPIC_\|^CLAUDE_'` | `Get-ChildItem Env: \| Where-Object Name -match '^ANTHROPIC_\|^CLAUDE_'` |
-| PATH 里有没有安装目录 | `echo $PATH \| tr ':' '\n' \| grep -E '\.local/bin'` | `$env:PATH -split ';' \| Select-String 'ccdeepseek\\bin'` |
+| PATH 里有没有安装目录 | `echo $PATH \| tr ':' '\n' \| grep -E '\.local/bin'` | `$env:PATH -split ';' \| Select-String 'cc-router\\bin'` |
 | DEEPSEEK_API_KEY 是否已设 | `[ -n "$DEEPSEEK_API_KEY" ] && echo SET \|\| echo MISSING` | `if ($env:DEEPSEEK_API_KEY) { 'SET' } else { 'MISSING' }` |
 
 # 操作步骤模板（STEPS，按需执行，每一步先解释"为什么"再给命令）
@@ -100,7 +100,7 @@ npm install -g @anthropic-ai/claude-code
 
 如果连 Node 都没装：先按当前操作系统给我**官方推荐**的 Node 安装方式（建议 LTS），不要让我手动下 tarball。
 
-## Step 2 - 安装 `cc` / `ccd` 启动器
+## Step 2 - 安装 `ccr` / `ccr deepseek` 启动器
 
 Linux / WSL / macOS：
 
@@ -143,7 +143,7 @@ $env:DEEPSEEK_API_KEY = "<paste-key-here>"
 ## Step 4 - 自检
 
 ```bash
-ccd doctor
+ccr deepseek doctor
 ```
 
 期望输出包含两行 `OK:`。任何 `Missing:` 都要立刻给我对应的修复指令。
@@ -151,9 +151,9 @@ ccd doctor
 ## Step 5 - 试跑
 
 ```bash
-ccd --help
-ccd prompt          # 看模板路径
-ccd                 # 真正启动一次
+ccr deepseek --help
+ccr deepseek prompt          # 看模板路径
+ccr deepseek                 # 真正启动一次
 ```
 
 # 输出格式要求（OUTPUT_FORMAT）
@@ -184,4 +184,4 @@ ccd                 # 真正启动一次
 
 - 拆分为 "minimal / full" 两个版本，给老手更短的引导
 - 接入 `--lang en` 输出英文版本
-- 让 `ccd prompt` 支持把模板直接打到剪贴板（依赖系统 `xclip` / `pbcopy` / `clip.exe`，按平台条件启用）
+- 让 `ccr deepseek prompt` 支持把模板直接打到剪贴板（依赖系统 `xclip` / `pbcopy` / `clip.exe`，按平台条件启用）

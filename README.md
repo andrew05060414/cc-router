@@ -2,22 +2,22 @@
 
 Lightweight cross-platform quick launcher for Claude Code:
 
-- `cc` = the default way to boot Claude Code, with sane defaults
-- `cc -*` = optional variants for routing / setup / advanced modes
+- `ccr` = the default way to boot Claude Code, with sane defaults
+- `ccr <subcommand>` = optional variants for routing / setup / advanced modes
 
-Most behavior is controlled through `cc setup` and `cc config`, so users can keep
-`cc` simple and opt into more advanced behavior only when they need it.
+Most behavior is controlled through `ccr setup` and `ccr config`, so users can keep
+`ccr` simple and opt into more advanced behavior only when they need it.
 
 > **First time with 9Router + OAuth + prompt-cache fix?** Read
-> [`docs/SETUP-GUIDE.md`](docs/SETUP-GUIDE.md) and run `cc setup install-deps` then `cc setup check`.
+> [`docs/SETUP-GUIDE.md`](docs/SETUP-GUIDE.md) and run `ccr setup install-deps` then `ccr setup check`.
 > PM-oriented overview: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 >
 > **Hitting weird `/context` bloat or other quirks?** See
 > [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md). Planned setup improvements:
 > [`docs/TODO.md`](docs/TODO.md).
 >
-> **Remote server onboarding?** See [`docs/CC-REMOTE.md`](docs/CC-REMOTE.md)
-> and run `cc-remote pack` then `cc-remote setup <host>`.
+> **Remote server onboarding?** See [`docs/CR-REMOTE.md`](docs/CR-REMOTE.md)
+> and run `ccr remote pack` then `ccr remote setup <host>`.
 
 Supported now:
 
@@ -37,18 +37,18 @@ Supported now:
 Use no-profile mode to avoid old profile function interference during validation:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\ccd.ps1" --help
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\ccr.ps1" --help
 ```
 
 Remote onboarding from Windows:
 
 ```powershell
-cc-remote pack
-cc-remote setup lgsj-h100
-cc-remote ssh lgsj-h100 C:\RemoteProject
+ccr remote pack
+ccr remote setup lgsj-h100
+ccr remote ssh lgsj-h100 C:\RemoteProject
 ```
 
-See [`docs/CC-REMOTE.md`](docs/CC-REMOTE.md) for details.
+See [`docs/CR-REMOTE.md`](docs/CR-REMOTE.md) for details.
 
 ### Linux / WSL
 
@@ -63,48 +63,48 @@ export PATH="$HOME/.local/bin:$PATH"
 ### Default mode
 
 ```bash
-cc
-cc --model sonnet
-cc resume
-cc setup
-cc setup check
-cc doctor
+ccr
+ccr --model sonnet
+ccr resume
+ccr setup
+ccr setup check
+ccr doctor
 ```
 
-`cc` is the quick launcher. `cc setup` and `cc config` are where users decide
+`ccr` is the quick launcher. `ccr setup` and `ccr config` are where users decide
 what the launcher should do.
 
 ### Advanced mode
 
 ```bash
-cc -9
-cc -9 resume
-cc -9 --model sonnet
-cc -9 doctor
+ccr 9router
+ccr 9router resume
+ccr 9router --model sonnet
+ccr 9router doctor
 ```
 
-In `cc -9`, Claude slot selectors such as `sonnet`, `haiku`, `opus`, and
+In `ccr 9router`, Claude slot selectors such as `sonnet`, `haiku`, `opus`, and
 `claude-sonnet-*` are rewritten to the active `NINEROUTER_*_MODEL` targets
 before Claude Code launches. This keeps agent/subagent launches aligned with
 your `cc-normal` / `cc-lite` / `cc-pro` routing.
 
-`cc -9` is the opt-in path for 9Router + cache-fix. It stays available, but it
+`ccr 9router` is the opt-in path for 9Router + cache-fix. It stays available, but it
 is not the main story for new users.
 
-`cc -9 doctor` also reports whether agent slot alias rewrite is active, so you
+`ccr 9router doctor` also reports whether agent slot alias rewrite is active, so you
 can confirm that explicit `--model sonnet|haiku|opus` launches will remap onto
 your active `cc-*` slots before Claude Code starts.
 
-### CC Switch mode (`ccs`)
+### CC Switch mode (`ccr switch`)
 
 ```bash
-ccs
-ccs resume
-ccs --model sonnet
-ccs doctor
+ccr switch
+ccr switch resume
+ccr switch --model sonnet
+ccr switch doctor
 ```
 
-`ccs` is the **recommended path for users who do not have an Anthropic
+`ccr switch` is the **recommended path for users who do not have an Anthropic
 account** and route everything through [CC Switch](https://github.com/farion1231/cc-switch)
 instead. It sets `ANTHROPIC_BASE_URL` to the CC Switch proxy
 (`http://127.0.0.1:15721` by default) and lets CC Switch handle:
@@ -114,34 +114,31 @@ instead. It sets `ANTHROPIC_BASE_URL` to the CC Switch proxy
 - failover + circuit-breaker across multiple Provider accounts
 - per-request usage logging
 
-`ccs` does **not** chain the cache-fix proxy (no Anthropic account → no
+`ccr switch` does **not** chain the cache-fix proxy (no Anthropic account → no
 prefix cache to optimize) and does **not** rewrite `--model sonnet|haiku|opus`
 to `cc-normal/cc-lite/cc-pro` (CC Switch model mapping expects the canonical
-`claude-*` name). For 9Router slot alias behavior, keep using `cc -9`.
+`claude-*` name). For 9Router slot alias behavior, keep using `ccr 9router`.
 
 Override the proxy URL when needed:
 
 ```bash
-CC_CCS_PROXY_URL=http://host:port ccs
+CC_CCS_PROXY_URL=http://host:port ccr switch
 # or persist:
-cc config set ccsProxyUrl http://host:port
+ccr config set ccsProxyUrl http://host:port
 ```
 
-`ccs doctor` checks that the CC Switch proxy is reachable and prints the
+`ccr switch doctor` checks that the CC Switch proxy is reachable and prints the
 effective env that would be injected.
 
 ### Supported now
 
-- `-9` for 9Router / cache-fix routing
-- `ccs` for CC Switch proxy routing (recommended when no Anthropic account)
-- `ccd` for DeepSeek mode and AI-assisted setup
-- `cc-remote` for one-shot remote server onboarding via SSH/scp
-- `setup`, `config`, and `doctor` for onboarding and diagnostics
+- `ccr 9router` for 9Router / cache-fix routing
+- `ccr switch` for CC Switch proxy routing (recommended when no Anthropic account)
+- `ccr deepseek` for DeepSeek mode and AI-assisted setup
+- `ccr remote` for one-shot remote server onboarding via SSH/scp
+- `ccr setup`, `ccr config`, `ccr doctor` for onboarding and diagnostics
 
-`-d` and `-a` are good future alias candidates if you want a more public-facing
-flag family later, but they are not implemented yet.
-
-### Permission / bypass settings (`cc config`)
+### Permission / bypass settings (`ccr config`)
 
 cc-router keeps its own small config file (separate from Claude Code):
 
@@ -151,45 +148,45 @@ cc-router keeps its own small config file (separate from Claude Code):
 Interactive setup:
 
 ```bash
-cc config setup
+ccr config setup
 ```
 
 | Setting | Meaning |
 | --- | --- |
-| `allowDangerouslySkipPermissions` | When `true`, every `cc` / `cc -9` / `ccs` / `ccd` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
+| `allowDangerouslySkipPermissions` | When `true`, every `ccr` / `ccr 9router` / `ccr switch` / `ccr deepseek` launch adds `--allow-dangerously-skip-permissions` (Bypass appears in Shift+Tab cycle) |
 | `cachePromptEnvEnabled` | When `true` (default), sets `CLAUDE_CODE_ATTRIBUTION_HEADER=false` and `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` on every launch |
-| `cacheFixEnabled` | When `true` (default), **official `cc`** sets `ANTHROPIC_BASE_URL` to the local cache-fix proxy |
-| `cacheFix9routerEnabled` | When `true` (default), **`cc -9`** uses cache-fix at `cacheFixUrl` with upstream at `nineRouterUrl` / `NINEROUTER_URL`. Set to `off` if you do not have an Anthropic account — the proxy then has nothing to optimize. |
-| `cacheFixUrl` | cache-fix listen URL (default `http://127.0.0.1:9801`) — probed at `/health` by `cc doctor` |
+| `cacheFixEnabled` | When `true` (default), **official `ccr`** sets `ANTHROPIC_BASE_URL` to the local cache-fix proxy |
+| `cacheFix9routerEnabled` | When `true` (default), **`ccr 9router`** uses cache-fix at `cacheFixUrl` with upstream at `nineRouterUrl` / `NINEROUTER_URL`. Set to `off` if you do not have an Anthropic account — the proxy then has nothing to optimize. |
+| `cacheFixUrl` | cache-fix listen URL (default `http://127.0.0.1:9801`) — probed at `/health` by `ccr doctor` |
 | `nineRouterUrl` | Fallback 9Router base when `NINEROUTER_URL` is unset (default `http://127.0.0.1:20128`) |
-| `ccsProxyUrl` | CC Switch proxy URL for `ccs` (default `http://127.0.0.1:15721`) — probed at `/health` by `ccs doctor` |
-| `claudePermissionsTarget` | Default file for `cc config claude …`: `none`, `global` (`~/.claude/settings.json`), or `project` (`<repo>/.claude/settings.json`) |
+| `ccsProxyUrl` | CC Switch proxy URL for `ccr switch` (default `http://127.0.0.1:15721`) — probed at `/health` by `ccr switch doctor` |
+| `claudePermissionsTarget` | Default file for `ccr config claude …`: `none`, `global` (`~/.claude/settings.json`), or `project` (`<repo>/.claude/settings.json`) |
 
 Prompt-cache defaults and [claude-code-cache-fix](https://github.com/cnighswonger/claude-code-cache-fix) chaining are documented in [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md) §7–§8.
 
 Examples:
 
 ```bash
-cc config set allowDangerouslySkipPermissions on
-cc config set cacheFix9routerEnabled on   # default on; cc -9 → cache-fix → 9Router
-cc config set cacheFixEnabled on          # default on; official cc → cache-fix → Anthropic
-cc config set cacheFixUrl http://127.0.0.1:9801
-cc config set claudePermissionsTarget global
-cc config claude set permissions.defaultMode acceptEdits --global
-cc config claude enable-bypass-permissions --project
-cc config show
+ccr config set allowDangerouslySkipPermissions on
+ccr config set cacheFix9routerEnabled on   # default on; ccr 9router → cache-fix → 9Router
+ccr config set cacheFixEnabled on          # default on; official ccr → cache-fix → Anthropic
+ccr config set cacheFixUrl http://127.0.0.1:9801
+ccr config set claudePermissionsTarget global
+ccr config claude set permissions.defaultMode acceptEdits --global
+ccr config claude enable-bypass-permissions --project
+ccr config show
 ```
 
 One-shot without editing JSON:
 
 ```bash
-CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS=1 cc
+CC_ALLOW_DANGEROUSLY_SKIP_PERMISSIONS=1 ccr
 ```
 
 See `config.example.json` in the repo root.
 
-If you want a guided first run, `cc setup` is the setup path; if you want
-to make the launcher more opinionated, `cc config` is where those defaults live.
+If you want a guided first run, `ccr setup` is the setup path; if you want
+to make the launcher more opinionated, `ccr config` is where those defaults live.
 
 9Router env:
 
@@ -222,16 +219,16 @@ $env:DEEPSEEK_API_KEY = "your_key"
 Then run:
 
 ```bash
-ccd setup
-ccd
-ccd --model deepseek-v4-pro[1m] --max-output 32768
-ccd resume
-ccd doctor
+ccr deepseek setup
+ccr deepseek
+ccr deepseek --model deepseek-v4-pro[1M] --max-output 32768
+ccr deepseek resume
+ccr deepseek doctor
 ```
 
-DeepSeek **prompt cache** verification: [`docs/CCD-CACHE-BENCH.md`](docs/CCD-CACHE-BENCH.md) and `scripts/ccd-cache-bench.sh`.
+DeepSeek **prompt cache** verification: [`docs/CR-CACHE-BENCH.md`](docs/CR-CACHE-BENCH.md) and `scripts/test/test-ccr-cache-bench.sh`.
 
-`ccd setup` will:
+`ccr deepseek setup` will:
 
 - Ask for `DEEPSEEK_API_KEY`
 - Ask how to persist:
@@ -241,19 +238,19 @@ DeepSeek **prompt cache** verification: [`docs/CCD-CACHE-BENCH.md`](docs/CCD-CAC
 
 ## What doctor can fix
 
-`cc doctor` and `ccd doctor` check common Linux/WSL misconfigurations and print copy-paste fixes:
+`ccr doctor` and `ccr deepseek doctor` check common Linux/WSL misconfigurations and print copy-paste fixes:
 
 - `claude` not installed / not in `PATH`
-- `~/.local/bin` missing from `PATH` (when `cc` / `ccd` are installed there)
+- `~/.local/bin` missing from `PATH` (when `ccr` / `ccr deepseek` are installed there)
 - stale `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` that can break official mode
 - missing `DEEPSEEK_API_KEY` for DeepSeek mode
-- runtime env expectation hints (why `ANTHROPIC_*` may be empty outside `ccd`)
+- runtime env expectation hints (why `ANTHROPIC_*` may be empty outside `ccr deepseek`)
 
 Examples:
 
 ```bash
-cc doctor
-ccd doctor
+ccr doctor
+ccr deepseek doctor
 ```
 
 If something is wrong, doctor prints direct fix commands such as:
@@ -266,17 +263,17 @@ export DEEPSEEK_API_KEY="your_key"
 ```
 
 For verbose diagnostics with a full env / launcher / settings.json
-breakdown, use `cc -9 doctor detail` (or `cc doctor detail` / `ccd doctor`).
+breakdown, use `ccr 9router doctor detail` (or `ccr doctor detail` / `ccr deepseek doctor`).
 For the underlying root causes behind common bloat / routing issues, see
 [`docs/SETUP-NOTES.md`](docs/SETUP-NOTES.md).
 
 For local shell regressions, run:
 
 ```bash
-bash scripts/test.sh
+bash scripts/test/test-ccr.sh
 ```
 
-Supported `ccd` options:
+Supported `ccr deepseek` options:
 
 - `-h`, `--help`
 - `setup` (interactive API key setup wizard)
@@ -288,36 +285,36 @@ Supported `ccd` options:
 - `--max-output <n>`
 - `--autocompact-pct <n>`
 
-### `ccd prompt` (one-shot AI-assisted setup)
+### `ccr deepseek prompt` (one-shot AI-assisted setup)
 
 If you'd rather have an AI agent (Claude Code / Codex / Cursor / Aider / ...)
-walk you through detection, install, key setup, and `ccd doctor` in your real
+walk you through detection, install, key setup, and `ccr deepseek doctor` in your real
 terminal, use the built-in dramatic prompt template:
 
 ```bash
-ccd prompt                  # show template path + copy/paste hints
-ccd prompt --print-prompt   # print the full template content to stdout
-ccd prompt --help           # subcommand-level help
+ccr deepseek prompt                  # show template path + copy/paste hints
+ccr deepseek prompt --print-prompt   # print the full template content to stdout
+ccr deepseek prompt --help           # subcommand-level help
 ```
 
 Pipe it straight to your clipboard:
 
 ```bash
-ccd prompt --print-prompt | xclip -selection clipboard   # Linux
-ccd prompt --print-prompt | pbcopy                       # macOS
-ccd prompt --print-prompt | clip.exe                     # Windows / WSL
+ccr deepseek prompt --print-prompt | xclip -selection clipboard   # Linux
+ccr deepseek prompt --print-prompt | pbcopy                       # macOS
+ccr deepseek prompt --print-prompt | clip.exe                     # Windows / WSL
 ```
 
 Then paste it into any AI coding agent and follow the steps it gives you.
 
 Source template lives at `docs/dramatic-prompt.md`. After `install.sh` it is
-also copied to `~/.local/share/ccdeepseek/dramatic-prompt.md`; after `install.ps1`
-it is copied to `$HOME\.ccdeepseek\share\dramatic-prompt.md`. You can override
+also copied to `~/.local/share/cc-router/templates/dramatic-prompt.md`; after `install.ps1`
+it is copied to `$HOME\.local\share\cc-router\templates\dramatic-prompt.md`. You can override
 the lookup with `CCD_PROMPT_TEMPLATE=/abs/path/to/your-prompt.md`.
 
 ### `--worktree` (Linux / WSL script)
 
-`ccd --worktree <name>` will create or reuse `.worktrees/<name>` under your git repo root, then run `claude` in that directory.
+`ccr deepseek --worktree <name>` will create or reuse `.worktrees/<name>` under your git repo root, then run `claude` in that directory.
 
 Guardrails:
 
@@ -338,12 +335,12 @@ Mixing official Claude and DeepSeek routing in one shell can easily create bad e
 - official login breaks if `ANTHROPIC_AUTH_TOKEN` points to DeepSeek key
 - requests go to wrong endpoint if `ANTHROPIC_BASE_URL` is left over
 
-`cc` and `ccd` isolate this so switching providers is predictable.
+`ccr` and `ccr deepseek` isolate this so switching providers is predictable.
 
 ## Roadmap (TODO)
 
-- ~~Add one-shot "dramatic prompt" for AI-assisted setup~~ (done, see `ccd prompt`)
-- ~~Mirror `ccd prompt` in the PowerShell launcher (`scripts/ccd.ps1`)~~
+- ~~Add one-shot "dramatic prompt" for AI-assisted setup~~ (done, see `ccr deepseek prompt`)
+- ~~Mirror `ccr deepseek prompt` in the PowerShell launcher (`scripts/ccd.ps1`)~~
 - ~~Add proper `--worktree` flow with guardrails~~
 - ~~Add richer doctor checks and guided fixes~~
 - Add support for other coding CLIs / TUI routing presets (including DeepSeek TUI)

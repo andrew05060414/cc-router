@@ -1,10 +1,10 @@
 # cc-router Setup Notes & Known Issues
 
 **New to the full stack (9Router + OAuth + cache-fix)?** Start with
-[SETUP-GUIDE.md](SETUP-GUIDE.md), then run `cc setup check`.
+[SETUP-GUIDE.md](SETUP-GUIDE.md), then run `ccr setup check`.
 
 This file collects setup quirks, gotchas, and root-cause notes that don't
-belong in the main README. Read this if `cc -9` / `ccd` behaves strangely,
+belong in the main README. Read this if `ccr -9` / `ccr deepseek` behaves strangely,
 if `/context` shows unexpected token usage, or if you're debugging a
 context-bloat issue.
 
@@ -14,13 +14,13 @@ context-bloat issue.
 
 ### Symptom
 
-After switching to `cc -9` (or `ccd` on a small-context model), the
+After switching to `ccr -9` (or `ccr deepseek` on a small-context model), the
 `/context` view shows:
 
 - **`Messages` bucket inflated by 30k+ tokens** even on the very first turn,
   before you've typed anything beyond `hi`
 - **No `System tools` / `MCP tools` row** in `/context`, or those rows are
-  much smaller than what you see under official `cc`
+  much smaller than what you see under official `ccr`
 - Total context usage at session start is ~30-60% on a 200k model, vs
   ~12% under official mode with the same plugins enabled
 
@@ -53,7 +53,7 @@ References:
 
 ### Fix (already applied to cc-router)
 
-Both `cc -9` and `ccd` now set:
+Both `ccr -9` and `ccr deepseek` now set:
 
 ```text
 ENABLE_TOOL_SEARCH=true
@@ -96,23 +96,23 @@ $env:CCD_TOOL_SEARCH = 'auto'
 Open a **new shell** (running processes hold a snapshot of env vars) and:
 
 ```bash
-cc -9 doctor detail
+ccr 9router doctor detail
 ```
 
-In section `[4] Effective env that 'cc -9' would inject`, look for:
+In section `[4] Effective env that 'ccr 9router' would inject`, look for:
 
 ```text
 ENABLE_TOOL_SEARCH                       = true  (forces deferred MCP tool loading)
 ```
 
-Then start `cc -9`, type `hi`, run `/context`. Expected:
+Then start `ccr -9`, type `hi`, run `/context`. Expected:
 
 - A separate `MCP tools` (and possibly `System tools`) bucket exists
 - `Messages` bucket is < 8k
-- Total usage similar to official `cc` (typically 10-15% on a 200k model)
+- Total usage similar to official `ccr` (typically 10-15% on a 200k model)
 
 If `/context` still shows 30%+ messages: see the upstream-proxy section
-above, or open an issue with your `cc -9 doctor detail` output.
+above, or open an issue with your `ccr -9 doctor detail` output.
 
 ---
 
@@ -131,7 +131,7 @@ Claude Code's client recognizes only model names matching:
 - `claude-sonnet-*`
 - `claude-haiku-*`
 
-A custom name like `cc-pro` / `cc-normal` / `cc-lite` falls into an
+A custom name like `ccr-pro` / `ccr-normal` / `ccr-lite` falls into an
 **unknown-model branch**, where the client uses its own defaults for:
 
 - Max output tokens (default fallback value)
@@ -152,9 +152,9 @@ A custom name like `cc-pro` / `cc-normal` / `cc-lite` falls into an
 
 | Slot   | Default name |
 |--------|--------------|
-| Opus   | `cc-pro`     |
-| Sonnet | `cc-normal`  |
-| Haiku  | `cc-lite`    |
+| Opus   | `ccr-pro`     |
+| Sonnet | `ccr-normal`  |
+| Haiku  | `ccr-lite`    |
 
 These match the historical 9Router alias convention. Your 9Router config
 must expose routes for these names (or you must override them — see below).
@@ -176,7 +176,7 @@ export NINEROUTER_HAIKU_MODEL='claude-haiku-4-5'
 ```
 
 Then add matching alias routes inside 9Router that point at your real
-upstream models. `cc -9 doctor` will switch its line for that slot from
+upstream models. `ccr -9 doctor` will switch its line for that slot from
 `INFO` (custom) to `OK` (claude family).
 
 ### Precedence (when multiple sources set the same model)
@@ -184,15 +184,15 @@ upstream models. `cc -9 doctor` will switch its line for that slot from
 ```text
 [wins] ~/.claude/settings.json  env  block
        ↓
-       cc -9 process env (from NINEROUTER_*_MODEL or cc-router defaults)
+       ccr 9router process env (from NINEROUTER_*_MODEL or cc-router defaults)
        ↓
 [loses] Claude Code built-in defaults
 ```
 
 If `settings.json` has an `env` block setting `ANTHROPIC_DEFAULT_*_MODEL`,
-it overrides whatever `cc -9` injects. `cc -9 doctor detail` section [5]
+it overrides whatever `ccr -9` injects. `ccr -9 doctor detail` section [5]
 prints the contents of that block. Remove those keys from settings.json
-if you want `cc -9` to be authoritative.
+if you want `ccr -9` to be authoritative.
 
 ---
 
@@ -201,16 +201,16 @@ if you want `cc -9` to be authoritative.
 ### What `install.ps1` actually does
 
 ```text
-D:\Andrew\Code\cc-router\scripts\cc.ps1   ─── copy ───>   $HOME\.ccdeepseek\bin\cc.ps1
-D:\Andrew\Code\cc-router\scripts\ccd.ps1  ─── copy ───>   $HOME\.ccdeepseek\bin\ccd.ps1
-D:\Andrew\Code\cc-router\scripts\common.ps1 ── copy ───>  $HOME\.ccdeepseek\bin\common.ps1
+D:\Andrew\Code\cc-router\scripts\cc.ps1   ─── copy ───>   $HOME\cc-router\bin\cc.ps1
+D:\Andrew\Code\cc-router\scripts\ccr deepseek.ps1  ─── copy ───>   $HOME\cc-router\bin\ccr deepseek.ps1
+D:\Andrew\Code\cc-router\scripts\common.ps1 ── copy ───>  $HOME\cc-router\bin\common.ps1
 ```
 
 If you ran `install.ps1 -AddToProfile`, the profile entry it added looks
 like:
 
 ```powershell
-function cc { & 'C:\Users\Andrew\.ccdeepseek\bin\cc.ps1' @args }
+function cc { & 'C:\Users\Andrew\cc-router\bin\cc.ps1' @args }
 ```
 
 i.e. it points at the **copy**, not at the source repo.
@@ -218,7 +218,7 @@ i.e. it points at the **copy**, not at the source repo.
 ### Implication
 
 After editing the source scripts in `D:\...\cc-router\scripts\`, your
-`cc` / `ccd` commands keep running the OLD copies until you **re-run
+`ccr` / `ccr deepseek` commands keep running the OLD copies until you **re-run
 `install.ps1`** to refresh them.
 
 ```powershell
@@ -234,20 +234,20 @@ replace the install-generated profile entries with:
 ```powershell
 $ccRouterRoot = 'D:\path\to\cc-router'
 function global:cc  { & "$ccRouterRoot\scripts\cc.ps1"  @args }
-function global:ccd { & "$ccRouterRoot\scripts\ccd.ps1" @args }
+function global:ccr deepseek { & "$ccRouterRoot\scripts\ccr deepseek.ps1" @args }
 ```
 
-Now your `cc` always runs the latest source. No more sync needed.
+Now your `ccr` always runs the latest source. No more sync needed.
 
-`cc -9 doctor detail` section `[1] Launcher resolution` will show you
-which path your `cc` actually resolves to.
+`ccr -9 doctor detail` section `[1] Launcher resolution` will show you
+which path your `ccr` actually resolves to.
 
 ---
 
 ## 4. Restart Windows After Changing Scripts or Env
 
 A running Claude Code process holds a snapshot of environment variables
-from the moment it was launched. Editing `cc.ps1` or your shell env does
+from the moment it was launched. Editing `ccr.ps1` or your shell env does
 **not** propagate into an already-running session.
 
 After any change to scripts/env:
@@ -255,9 +255,9 @@ After any change to scripts/env:
 1. Exit the Claude Code TUI (`/exit` or `Ctrl+C`)
 2. Close the shell window (recommended; ensures `$ccScript` and friends
    are re-resolved)
-3. Open a fresh shell and re-launch `cc -9` / `ccd`
+3. Open a fresh shell and re-launch `ccr -9` / `ccr deepseek`
 
-If you suspect a stale window is causing weird behavior, `cc -9 doctor
+If you suspect a stale window is causing weird behavior, `ccr -9 doctor
 detail` will print the **simulated** env that a fresh launch would inject.
 Compare it against what you actually see inside the running session.
 
@@ -287,7 +287,7 @@ dot-sourcing one from the other.
 
 ---
 
-## 6. settings.json `env` Block Can Override `cc -9` Process Env
+## 6. settings.json `env` Block Can Override `ccr -9` Process Env
 
 `~/.claude/settings.json` accepts an `env` block:
 
@@ -301,10 +301,10 @@ dot-sourcing one from the other.
 ```
 
 In some Claude Code versions, this block **takes precedence over** env
-vars set by the wrapper script. If `cc -9` injects fresh model names but
+vars set by the wrapper script. If `ccr -9` injects fresh model names but
 your settings.json still has stale values, the stale ones win.
 
-`cc -9 doctor detail` section `[5]` will print the contents of this block
+`ccr -9 doctor detail` section `[5]` will print the contents of this block
 (secrets redacted). If you see entries here that conflict with what your
 wrapper sets, delete the `env` block from `settings.json` and let the
 wrapper own provider routing entirely.
@@ -313,7 +313,7 @@ wrapper own provider routing entirely.
 
 ## 7. Prompt cache env (all launch modes)
 
-cc-router sets on every `cc`, `cc -9`, and `ccd` launch:
+cc-router sets on every `ccr`, `ccr -9`, and `ccr deepseek` launch:
 
 ```text
 CLAUDE_CODE_ATTRIBUTION_HEADER=false
@@ -334,19 +334,19 @@ export CC_ATTRIBUTION_HEADER=false          # default when unset
 export CC_DISABLE_GIT_INSTRUCTIONS=1        # default when unset; empty string unsets
 ```
 
-Verify DeepSeek cache hits at home: [`CCD-CACHE-BENCH.md`](CCD-CACHE-BENCH.md)
-and `scripts/ccd-cache-bench.sh`.
+Verify DeepSeek cache hits at home: [`CR-CACHE-BENCH.md`](CR-CACHE-BENCH.md)
+and `scripts/ccr deepseek-cache-bench.sh`.
 
 ---
 
-## 8. claude-code-cache-fix (default on for `cc` and `cc -9`)
+## 8. claude-code-cache-fix (default on for `ccr` and `ccr -9`)
 
 [claude-code-cache-fix](https://github.com/cnighswonger/claude-code-cache-fix)
 is a local proxy that stabilizes Claude Code request prefixes (billing header,
 resume block layout, tool order, etc.) so **prompt cache** hits stay high.
 
 cc-router enables it by default (`cacheFixEnabled`, `cacheFix9routerEnabled`).
-Turn off with `cc config set cacheFix9routerEnabled off` (or `cacheFixEnabled off`
+Turn off with `ccr config set cacheFix9routerEnabled off` (or `cacheFixEnabled off`
 for official mode only).
 
 ### Install and start (one-time)
@@ -355,7 +355,7 @@ for official mode only).
 npm install -g claude-code-cache-fix
 ```
 
-**For `cc -9` (OAuth / model switching via 9Router)** — upstream must be 9Router:
+**For `ccr -9` (OAuth / model switching via 9Router)** — upstream must be 9Router:
 
 ```bash
 export CACHE_FIX_PROXY_UPSTREAM=http://127.0.0.1:20128   # or your NINEROUTER_URL
@@ -363,19 +363,19 @@ node "$(npm root -g)/claude-code-cache-fix/proxy/server.mjs" &
 curl http://127.0.0.1:9801/health
 ```
 
-**For official `cc` only** — upstream defaults to `https://api.anthropic.com`; same
+**For official `ccr` only** — upstream defaults to `https://api.anthropic.com`; same
 listen on `:9801`, no `CACHE_FIX_PROXY_UPSTREAM` needed unless you chain elsewhere.
 
-`cc -9 doctor` prints the exact start command when cache-fix health fails.
+`ccr -9 doctor` prints the exact start command when cache-fix health fails.
 
 ### What cc-router sets
 
 | Mode | `cacheFix*` config | `ANTHROPIC_BASE_URL` | cache-fix upstream |
 |------|-------------------|----------------------|--------------------|
-| `cc` | `cacheFixEnabled` (default on) | `http://127.0.0.1:9801` (no `/v1`) | Anthropic API |
-| `cc -9` | `cacheFix9routerEnabled` (default on) | `http://127.0.0.1:9801/v1` | `nineRouterUrl` or `NINEROUTER_URL` |
+| `ccr` | `cacheFixEnabled` (default on) | `http://127.0.0.1:9801` (no `/v1`) | Anthropic API |
+| `ccr -9` | `cacheFix9routerEnabled` (default on) | `http://127.0.0.1:9801/v1` | `nineRouterUrl` or `NINEROUTER_URL` |
 
-Chain for `cc -9`:
+Chain for `ccr -9`:
 
 ```text
 Claude Code → cache-fix (:9801) → 9Router (:20128) → provider (OAuth Claude, etc.)
@@ -387,11 +387,11 @@ Claude Code → cache-fix (:9801) → 9Router (:20128) → provider (OAuth Claud
 ### Config toggles
 
 ```bash
-cc config show
-cc config set cachePromptEnvEnabled off    # stop ATTRIBUTION_HEADER / git env injection
-cc config set cacheFix9routerEnabled off   # cc -9 direct to 9Router (no cache-fix)
-cc config set cacheFixEnabled off            # official cc direct to Anthropic
-cc config set nineRouterUrl http://127.0.0.1:20128
+ccr config show
+ccr config set cachePromptEnvEnabled off    # stop ATTRIBUTION_HEADER / git env injection
+ccr config set cacheFix9routerEnabled off   # ccr 9router direct to 9Router (no cache-fix)
+ccr config set cacheFixEnabled off            # official cc direct to Anthropic
+ccr config set nineRouterUrl http://127.0.0.1:20128
 ```
 
 Env overrides: `CC_CACHE_FIX_9ROUTER_ENABLED`, `CC_CACHE_FIX_ENABLED`,
@@ -399,9 +399,9 @@ Env overrides: `CC_CACHE_FIX_9ROUTER_ENABLED`, `CC_CACHE_FIX_ENABLED`,
 
 ### Existing `config.json`
 
-New installs and `cc config setup` use defaults **on**. If your file still has
-`"cacheFixEnabled": false` from an older example, run `cc config set cacheFixEnabled on`
-and `cc config set cacheFix9routerEnabled on`, or merge from `config.example.json`.
+New installs and `ccr config setup` use defaults **on**. If your file still has
+`"cacheFixEnabled": false` from an older example, run `ccr config set cacheFixEnabled on`
+and `ccr config set cacheFix9routerEnabled on`, or merge from `config.example.json`.
 
 ---
 
@@ -409,23 +409,23 @@ and `cc config set cacheFix9routerEnabled on`, or merge from `config.example.jso
 
 | Symptom | Most likely cause | First thing to try |
 |---|---|---|
-| New `cc -9` window: `/context` shows 30%+ on `hi` | `ENABLE_TOOL_SEARCH` not active or 9Router stripped `tool_reference` | `cc -9 doctor detail` → check `[4]` shows `ENABLE_TOOL_SEARCH = true`. If yes, try `$env:NINEROUTER_TOOL_SEARCH = 'auto'` to confirm 9Router compatibility |
-| Title bar shows `cc-normal` and you wanted `claude-sonnet-*` | cc-router defaults are the cc-* aliases (this is by design — section 2). Change them via `NINEROUTER_*_MODEL`. | `[Environment]::SetEnvironmentVariable('NINEROUTER_SONNET_MODEL','claude-sonnet-4-5','User')` then open a new shell |
-| Title bar shows the WRONG model name even after setting env var | `~/.claude/settings.json` `env` block is overriding it | `cc -9 doctor detail` → section `[5]` shows the block contents. Remove `ANTHROPIC_DEFAULT_*_MODEL` keys from there. |
-| Edited `cc.ps1` but behavior didn't change | `cc` resolves to install-time copy, not source | re-run `.\install.ps1` (no `-AddToProfile`) OR switch to dev-mode profile (section 3 above) |
-| `cc -9 doctor detail` says `cc command : NOT FOUND on PATH` | running under `-NoProfile` or wrong PowerShell host | open a normal shell; verify `$PROFILE` matches expected host |
+| New `ccr -9` window: `/context` shows 30%+ on `hi` | `ENABLE_TOOL_SEARCH` not active or 9Router stripped `tool_reference` | `ccr -9 doctor detail` → check `[4]` shows `ENABLE_TOOL_SEARCH = true`. If yes, try `$env:NINEROUTER_TOOL_SEARCH = 'auto'` to confirm 9Router compatibility |
+| Title bar shows `ccr-normal` and you wanted `claude-sonnet-*` | cc-router defaults are the cc-* aliases (this is by design — section 2). Change them via `NINEROUTER_*_MODEL`. | `[Environment]::SetEnvironmentVariable('NINEROUTER_SONNET_MODEL','claude-sonnet-4-5','User')` then open a new shell |
+| Title bar shows the WRONG model name even after setting env var | `~/.claude/settings.json` `env` block is overriding it | `ccr -9 doctor detail` → section `[5]` shows the block contents. Remove `ANTHROPIC_DEFAULT_*_MODEL` keys from there. |
+| Edited `ccr.ps1` but behavior didn't change | `ccr` resolves to install-time copy, not source | re-run `.\install.ps1` (no `-AddToProfile`) OR switch to dev-mode profile (section 3 above) |
+| `ccr -9 doctor detail` says `ccr command : NOT FOUND on PATH` | running under `-NoProfile` or wrong PowerShell host | open a normal shell; verify `$PROFILE` matches expected host |
 | `hi` returns 400 / "model not found" / weird upstream error | upstream proxy doesn't support `tool_reference` blocks (now that you enabled them) | `$env:NINEROUTER_TOOL_SEARCH = 'auto'` or `''` and retry |
-| Connection refused / timeout | 9Router not running or wrong port | `cc -9 doctor` → check `9Router health check returned ok=true` |
+| Connection refused / timeout | 9Router not running or wrong port | `ccr -9 doctor` → check `9Router health check returned ok=true` |
 
 ---
 
 ## 10. Where to Get Help
 
-- Run `cc -9 doctor detail` first - it covers ~80% of common
+- Run `ccr -9 doctor detail` first - it covers ~80% of common
   misconfigurations and prints copy-paste fixes.
 - For the MCP tool bloat issue specifically, the relevant Anthropic docs
   page is <https://code.claude.com/docs/en/env-vars> (search for
   `ENABLE_TOOL_SEARCH`).
 - For new bugs: file an issue with the full output of
-  `cc -9 doctor detail` (it auto-redacts tokens) plus a screenshot of
+  `ccr -9 doctor detail` (it auto-redacts tokens) plus a screenshot of
   `/context` after typing `hi` in a fresh session.
