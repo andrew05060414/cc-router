@@ -189,8 +189,38 @@ mkdir -p "$CLAUDE_DIR"
 
 echo "[remote] 安装 Claude Code..."
 if command -v npm >/dev/null 2>&1; then
-  # 安装主包 + 平台 native 包
-  npm install -g ./anthropic-ai-claude-code-*.tgz
+  # cd 到 PACK_DIR，确保相对 glob 能匹配到本目录的 .tgz
+  cd "$PACK_DIR"
+
+  # 主包（版本号文件名，如 anthropic-ai-claude-code-2.1.216.tgz）
+  main_tgz="$(ls -t anthropic-ai-claude-code-[0-9]*.tgz 2>/dev/null | head -1)"
+  if [[ -z "$main_tgz" ]]; then
+    echo "ERROR: 找不到 Claude Code 主包 (anthropic-ai-claude-code-<version>.tgz)" >&2
+    exit 1
+  fi
+
+  # 只装当前平台的 native 包，避免把 4 个平台 (~300MB) 全装上
+  arch="$(uname -m)"
+  libc="gnu"
+  if ldd --version 2>&1 | grep -qi musl; then libc="musl"; fi
+  case "$arch" in
+    x86_64|amd64) plat="linux-x64" ;;
+    aarch64|arm64) plat="linux-arm64" ;;
+    *) plat="" ;;
+  esac
+  native_tgz=""
+  if [[ -n "$plat" ]]; then
+    if [[ "$libc" == "musl" ]]; then
+      native_tgz="$(ls -t anthropic-ai-claude-code-${plat}-musl-[0-9]*.tgz 2>/dev/null | head -1)"
+    else
+      native_tgz="$(ls -t anthropic-ai-claude-code-${plat}-[0-9]*.tgz 2>/dev/null | head -1)"
+    fi
+  fi
+
+  pkgs=("$main_tgz")
+  [[ -n "$native_tgz" ]] && pkgs+=("$native_tgz")
+  echo "[remote] 安装包: ${pkgs[*]}"
+  npm install -g "${pkgs[@]}"
 else
   echo "ERROR: 远程系统没有 npm，请先安装 Node.js" >&2
   exit 1
@@ -389,6 +419,37 @@ EOF
 
 # ------------------------------- 远程安装 -------------------------------------
 
+# Upload the current repo (scripts/) to a remote host so `ccr` there is up to date.
+# Does not reinstall or touch the remote PATH.
+ccr_remote_push() {
+  local input="$1"
+  local target
+  target="$(ccr_remote_ssh_target "$input")"
+  local install_dir="/tmp/cc-router-install"
+  local local_repo="${CC_ROUTER_REPO_DIR:-}"
+  if [[ -z "$local_repo" ]]; then
+    local_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  fi
+
+  echo "[ccr remote push] 目标主机: $target"
+  ccr_remote_ssh_exec "$target" "rm -rf ${install_dir} && mkdir -p ${install_dir}"
+  tar -czf - \
+    --exclude='.git' \
+    --exclude='.codegraph' \
+    --exclude='remote-pack' \
+    -C "$local_repo" . \
+    | ccr_remote_ssh_exec "$target" "tar -xzf - -C ${install_dir}"
+
+  ccr_remote_ssh_exec "$target" "
+    set -e
+    cp -r ${install_dir}/scripts/lib/ ~/.local/share/cc-router/lib/
+    cp ${install_dir}/scripts/ccr ~/.local/bin/ccr
+    cp ${install_dir}/templates/remote/* ~/.local/share/cc-router/templates/remote/
+    echo 'push done'
+  "
+  echo "[ccr remote push] 完成: $target"
+}
+
 ccr_remote_setup() {
   local input="$1"
   local target
@@ -396,19 +457,29 @@ ccr_remote_setup() {
 
   echo "[cc-remote] 目标主机: $target"
 
-  # 确保本机已打包
+  # 确保本机已打包（按远端架构只打包对应平台，避免每次下载 ~300MB 全平台）
   local pack_dir
   pack_dir="$(ccr_remote_pack_dir)"
-  if [[ ! -f "$pack_dir/claude-code-"*.tgz ]]; then
-    echo "[cc-remote] 本地没有打包好的安装包，先执行 pack..."
-    ccr_remote_pack
+  local remote_plat
+  remote_plat="$(ccr_remote_ssh_exec "$target" 'uname -m; ldd --version 2>&1 | grep -qi musl && echo musl || echo gnu' 2>/dev/null | tr '\n' ' ')"
+  local arch libc plat
+  arch="$(awk '{print $1}' <<<"$remote_plat")"
+  libc="$(awk '{print $2}' <<<"$remote_plat")"
+  case "$arch" in
+    aarch64|arm64) plat="linux-arm64" ;;
+    *) plat="linux-x64" ;;
+  esac
+  [[ "$libc" == "musl" ]] && plat="${plat}-musl"
+  if [[ ! -f "$pack_dir/anthropic-ai-claude-code-${plat}-"*.tgz ]]; then
+    echo "[cc-remote] 本地没有 ${plat} 安装包，先执行 pack --platforms ${plat}..."
+    ccr_remote_pack --platforms "$plat"
   fi
 
-  # 上传到远程
+  # 上传到远程（用 "$pack_dir/." 拷贝目录内容，避免 scp -r 把目录本身嵌套成 remote-pack/remote-pack/）
   local remote_pack="/tmp/cc-router-remote-pack"
   echo "[cc-remote] 上传安装包到 ${target}:${remote_pack}..."
   ccr_remote_ssh_exec "$target" "rm -rf ${remote_pack} && mkdir -p ${remote_pack}"
-  ccr_remote_scp_to "$pack_dir/" "$target" "$remote_pack/"
+  ccr_remote_scp_to "${pack_dir}/." "$target" "${remote_pack}/"
 
   # 远程执行安装
   echo "[cc-remote] 远程执行安装..."
