@@ -1,0 +1,26 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.kimi.com/coding/",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "k3[1M]",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "k3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-for-coding",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "k3[1M]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "k3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-for-coding-highspeed",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "kimi-for-coding-highspeed",
+    "ANTHROPIC_MODEL": "kimi-for-coding",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+    "CLAUDE_CODE_DISABLE_TELEMETRY": "1",
+    "ANTHROPIC_DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+    "API_TIMEOUT_MS": "600000",
+    "DISABLE_AUTOUPDATER": "1",
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "git": {
+    "includeCoAuthor": false
+  },
+  "model": "opus",
+  "skipDangerousModePermissionPrompt": true
+}

@@ -1,0 +1,13 @@
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_TELEMETRY": "1",
+    "ANTHROPIC_DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "git": {
+    "includeCoAuthor": false
+  },
+  "model": "opus",
+  "skipDangerousModePermissionPrompt": false
+}
