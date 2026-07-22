@@ -219,6 +219,16 @@ if command -v npm >/dev/null 2>&1; then
 
   pkgs=("$main_tgz")
   [[ -n "$native_tgz" ]] && pkgs+=("$native_tgz")
+
+  # NixOS / 只读 global prefix fallback: install into ~/.local so binaries land
+  # in ~/.local/bin instead of a read-only system path.
+  user_prefix="${HOME}/.local"
+  if [[ ! -w "$(npm prefix -g 2>/dev/null || echo /usr/local)" ]]; then
+    echo "[remote] 检测到 npm global prefix 不可写，切换到用户目录: ${user_prefix}"
+    export NPM_CONFIG_PREFIX="${user_prefix}"
+    mkdir -p "${user_prefix}/bin"
+  fi
+
   echo "[remote] 安装包: ${pkgs[*]}"
   npm install -g "${pkgs[@]}"
 else
@@ -451,42 +461,374 @@ ccr_remote_push() {
 }
 
 ccr_remote_setup() {
-  local input="$1"
-  local target
-  target="$(ccr_remote_ssh_target "$input")"
+  local alias="" ip="" user="$CC_REMOTE_ONBOARD_DEFAULT_USER" port="$CC_REMOTE_ONBOARD_DEFAULT_PORT"
+  local password="" key="$CC_REMOTE_ONBOARD_DEFAULT_KEY"
+  local do_seed=0 install_tailscale=0 tailscale_auth_key="" tailscale_hostname=""
+  local install_node=-1 no_confirm=0 dry_run=0
 
-  echo "[cc-remote] 目标主机: $target"
-
-  # 确保本机已打包（按远端架构只打包对应平台，避免每次下载 ~300MB 全平台）
-  local pack_dir
-  pack_dir="$(ccr_remote_pack_dir)"
-  local remote_plat
-  remote_plat="$(ccr_remote_ssh_exec "$target" 'uname -m; ldd --version 2>&1 | grep -qi musl && echo musl || echo gnu' 2>/dev/null | tr '\n' ' ')"
-  local arch libc plat
-  arch="$(awk '{print $1}' <<<"$remote_plat")"
-  libc="$(awk '{print $2}' <<<"$remote_plat")"
-  case "$arch" in
-    aarch64|arm64) plat="linux-arm64" ;;
-    *) plat="linux-x64" ;;
+  local first="${1:-}"
+  case "$first" in
+    help|-h|--help)
+      ccr_remote_setup_show_help
+      return 0
+      ;;
+    ""|-*) : ;;
+    *)
+      alias="$first"
+      shift
+      ;;
   esac
-  [[ "$libc" == "musl" ]] && plat="${plat}-musl"
-  if [[ ! -f "$pack_dir/anthropic-ai-claude-code-${plat}-"*.tgz ]]; then
-    echo "[cc-remote] 本地没有 ${plat} 安装包，先执行 pack --platforms ${plat}..."
-    ccr_remote_pack --platforms "$plat"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ip) ip="$2"; shift 2 ;;
+      --user) user="$2"; shift 2 ;;
+      --password) password="$2"; shift 2 ;;
+      --port) port="$2"; shift 2 ;;
+      --key) key="$2"; shift 2 ;;
+      --seed-ide) do_seed=1; shift ;;
+      --tailscale-auth-key) tailscale_auth_key="$2"; install_tailscale=1; shift 2 ;;
+      --tailscale-hostname) tailscale_hostname="$2"; shift 2 ;;
+      --install-node) install_node=1; shift ;;
+      --no-install-node) install_node=0; shift ;;
+      --no-confirm) no_confirm=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) ccr_remote_setup_show_help; return 0 ;;
+      *)
+        if [[ -z "$alias" && "$1" != -* ]]; then
+          alias="$1"; shift
+        else
+          echo "ERROR: 未知选项: $1" >&2
+          ccr_remote_setup_show_help >&2
+          return 2
+        fi
+        ;;
+    esac
+  done
+
+  # 1. alias
+  if [[ -z "$alias" ]]; then
+    if [[ "$no_confirm" -eq 1 ]]; then
+      echo "ERROR: 非交互模式需要提供 alias" >&2
+      return 1
+    fi
+    alias="$(ccr_remote_onboard_prompt "SSH alias (例如 nas-2b)")"
+    [[ -n "$alias" ]] || ccr_remote_onboard_die "alias 不能为空"
   fi
 
-  # 上传到远程（用 "$pack_dir/." 拷贝目录内容，避免 scp -r 把目录本身嵌套成 remote-pack/remote-pack/）
-  local remote_pack="/tmp/cc-router-remote-pack"
-  echo "[cc-remote] 上传安装包到 ${target}:${remote_pack}..."
-  ccr_remote_ssh_exec "$target" "rm -rf ${remote_pack} && mkdir -p ${remote_pack}"
-  ccr_remote_scp_to "${pack_dir}/." "$target" "${remote_pack}/"
+  local target
+  target="$(ccr_remote_ssh_target "$alias")"
 
-  # 远程执行安装
-  echo "[cc-remote] 远程执行安装..."
-  ccr_remote_ssh_exec "$target" "bash ${remote_pack}/install-claude-remote.sh"
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] 目标: $target"
+  else
+    echo "[cc-remote] 目标主机: $target"
+  fi
 
-  echo "[cc-remote] 安装完成: $target"
-  echo "[cc-remote] 运行 'cc-remote ssh $input' 连接"
+  # 2. passwordless SSH probe
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] 将测试免密 SSH；失败时会提示上传公钥"
+  elif ! ccr_remote_setup_test_ssh "$target"; then
+    if [[ "$no_confirm" -eq 1 && -z "$password" ]]; then
+      echo "ERROR: 免密 SSH 失败且非交互模式未提供 --password" >&2
+      return 1
+    fi
+    if [[ -z "$ip" ]]; then
+      ip="$(ccr_remote_onboard_prompt "IP address for ${alias}")"
+      [[ -n "$ip" ]] || ccr_remote_onboard_die "IP 不能为空"
+    fi
+    if [[ -z "$password" ]]; then
+      password="$(ccr_remote_onboard_prompt_secret "Password for ${user}@${ip}")"
+      [[ -n "$password" ]] || ccr_remote_onboard_die "密码不能为空"
+    fi
+    if [[ "$no_confirm" -eq 0 ]]; then
+      echo
+      echo "即将为 ${alias} 配置免密 SSH:"
+      echo "  host:     ${user}@${ip}:${port}"
+      echo "  ssh key:  ${key}"
+      local confirm
+      read -r -p "确认? [Y/n]: " confirm
+      [[ -z "$confirm" || "$confirm" == [yY] ]] || { echo "已取消"; return 1; }
+    fi
+    ccr_remote_onboard_do_onboard "$alias" "$ip" "$user" "$port" "$password" "$key" 0
+    target="$(ccr_remote_ssh_target "$alias")"
+  else
+    ccr_remote_onboard_ok "免密 SSH 已可用: ${target}"
+  fi
+
+  # 3. OS detection
+  local os arch libc is_nixos=0
+  if [[ "$dry_run" -eq 0 ]]; then
+    local os_info
+    os_info="$(ccr_remote_ssh_exec "$target" "uname -s; uname -m; ldd --version 2>&1 | grep -qi musl && echo musl || echo gnu; test -f /etc/NIXOS && echo nixos || echo notnixos" 2>/dev/null)"
+    os="$(sed -n '1p' <<<"$os_info")"
+    arch="$(sed -n '2p' <<<"$os_info")"
+    libc="$(sed -n '3p' <<<"$os_info")"
+    [[ "$(sed -n '4p' <<<"$os_info")" == "nixos" ]] && is_nixos=1
+    echo "[cc-remote] 远端 OS: ${os} ${arch} (${libc})"
+    [[ "$is_nixos" -eq 1 ]] && ccr_remote_onboard_warn "检测到 NixOS"
+  else
+    os="Linux"; arch="x86_64"; libc="gnu"; is_nixos=0
+  fi
+
+  if [[ "$is_nixos" -eq 1 ]]; then
+    echo
+    echo "NixOS 无法自动安装某些组件。请选择:"
+    echo "  1) 跳过 NixOS 不支持的步骤，继续其他配置"
+    echo "  2) 中止并显示手动说明"
+    local nix_choice="1"
+    if [[ "$no_confirm" -eq 0 ]]; then
+      nix_choice="$(ccr_remote_onboard_prompt "选择 [1/2]" "1")"
+    fi
+    if [[ "$nix_choice" == "2" ]]; then
+      ccr_remote_setup_show_nixos_help
+      return 1
+    fi
+  fi
+
+  # 4. Node.js / npm
+  local has_npm=0
+  if [[ "$dry_run" -eq 0 ]] && ccr_remote_ssh_exec "$target" "command -v npm" >/dev/null 2>&1; then
+    has_npm=1
+  fi
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] 将检查远程 npm"
+  elif [[ "$has_npm" -eq 0 ]]; then
+    ccr_remote_onboard_warn "远程没有 npm"
+    if [[ "$install_node" -eq -1 && "$is_nixos" -eq 0 ]]; then
+      if ccr_remote_setup_read_yes_no "安装 Node.js/npm?"; then
+        install_node=1
+      else
+        install_node=0
+      fi
+    fi
+    if [[ "$install_node" -eq 1 ]]; then
+      if [[ "$is_nixos" -eq 1 ]]; then
+        ccr_remote_onboard_warn "NixOS 请手动安装: nix-shell -p nodejs"
+      else
+        local mirror
+        mirror="$(ccr_remote_setup_probe_npm_mirror "$target")"
+        ccr_remote_setup_install_nodejs "$target" "$mirror"
+        has_npm=1
+      fi
+    fi
+  fi
+
+  # 5. Claude Code install
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] 将探测架构并安装 Claude Code"
+  elif [[ "$has_npm" -eq 1 ]]; then
+    local plat
+    case "$arch" in
+      aarch64|arm64) plat="linux-arm64" ;;
+      *) plat="linux-x64" ;;
+    esac
+    [[ "$libc" == "musl" ]] && plat="${plat}-musl"
+
+    local pack_dir
+    pack_dir="$(ccr_remote_pack_dir)"
+    if [[ ! -f "$pack_dir/anthropic-ai-claude-code-${plat}-"*.tgz ]]; then
+      ccr_remote_onboard_info "本地没有 ${plat} 安装包，先执行 pack..."
+      ccr_remote_pack --platforms "$plat"
+    fi
+
+    local remote_pack="/tmp/cc-router-remote-pack"
+    ccr_remote_ssh_exec "$target" "rm -rf ${remote_pack} && mkdir -p ${remote_pack}"
+    ccr_remote_scp_to "${pack_dir}/." "$target" "${remote_pack}/"
+    ccr_remote_ssh_exec "$target" "bash ${remote_pack}/install-claude-remote.sh"
+    ccr_remote_onboard_ok "Claude Code 安装完成"
+  else
+    ccr_remote_onboard_warn "跳过 Claude Code 安装（远程没有 npm 且未选择安装 Node.js）"
+  fi
+
+  # 6. Config sync
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] 将同步 settings.json / CLAUDE.md / skills"
+  else
+    ccr_remote_sync "$alias"
+  fi
+
+  # 7. Tailscale
+  if [[ "$install_tailscale" -eq 0 && -z "$tailscale_auth_key" && "$no_confirm" -eq 0 && "$is_nixos" -eq 0 ]]; then
+    if ccr_remote_setup_read_yes_no "安装 Tailscale?"; then
+      install_tailscale=1
+    fi
+  fi
+  if [[ "$install_tailscale" -eq 1 ]]; then
+    if [[ -z "$tailscale_auth_key" && "$no_confirm" -eq 0 ]]; then
+      tailscale_auth_key="$(ccr_remote_onboard_prompt_secret "Tailscale auth key")"
+    fi
+    [[ -n "$tailscale_auth_key" ]] || ccr_remote_onboard_die "缺少 --tailscale-auth-key"
+    [[ -n "$tailscale_hostname" ]] || tailscale_hostname="$alias"
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "[dry-run] 将安装 Tailscale (hostname=${tailscale_hostname})"
+    else
+      ccr_remote_onboard_tailscale "$alias" "$tailscale_auth_key" "$tailscale_hostname" "$key" "$port"
+    fi
+  fi
+
+  # 8. IDE seed
+  if [[ "$do_seed" -eq 0 && "$no_confirm" -eq 0 ]]; then
+    if ccr_remote_setup_read_yes_no "推送 Cursor/Warp IDE server 缓存?"; then
+      do_seed=1
+    fi
+  fi
+  if [[ "$do_seed" -eq 1 ]]; then
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "[dry-run] 将推送 Cursor/Warp IDE server 缓存"
+    else
+      ccr_remote_onboard_seed "$alias" "$key" 0
+    fi
+  fi
+
+  # 9. Doctor
+  if [[ "$dry_run" -eq 0 ]]; then
+    echo
+    ccr_remote_doctor "$alias"
+  fi
+
+  echo
+  echo "[cc-remote] setup 完成: $alias"
+  echo "  连接: ccr remote ssh $alias"
+  echo "  同步: ccr remote sync $alias"
+}
+
+ccr_remote_setup_show_help() {
+  cat <<'EOF'
+ccr remote setup - Interactive all-in-one remote onboarding
+
+Usage:
+  ccr remote setup [alias] [options]
+
+Interactive (default):
+  ccr remote setup                    # prompts for alias, ip, user, password
+  ccr remote setup nas-2b             # prompts for missing fields
+
+Non-interactive:
+  ccr remote setup nas-2b --ip 10.18.23.131 --user lgsj --password 'Lgsj@123.' --no-confirm
+
+Options:
+  --ip IP                  Server IP or hostname
+  --user USER              SSH user (default: root)
+  --password PASS          SSH password (used to upload pubkey if needed)
+  --port PORT              SSH port (default: 22)
+  --key PATH               SSH private key path (default: ~/.ssh/id_longgang)
+  --seed-ide               Push Cursor/Warp IDE server cache
+  --tailscale-auth-key KEY Install Tailscale with this auth key
+  --tailscale-hostname NAME Tailscale hostname (default: alias)
+  --install-node           Install Node.js/npm if missing
+  --no-install-node        Skip Node.js/npm installation
+  --no-confirm             Run without prompting (requires all required flags)
+  --dry-run                Print steps without executing
+  -h, --help               Show this help
+
+Environment:
+  CC_REMOTE_ONBOARD_DEFAULT_KEY    default SSH key
+  CC_REMOTE_ONBOARD_DEFAULT_USER   default user
+  CC_REMOTE_ONBOARD_DEFAULT_PORT   default port
+EOF
+}
+
+ccr_remote_setup_show_nixos_help() {
+  cat <<'EOF'
+NixOS 手动配置提示:
+
+1. Node.js:
+   nix-shell -p nodejs
+
+2. Tailscale (在 /etc/nixos/configuration.nix 的 services 块里添加):
+   services.tailscale.enable = true;
+   services.tailscale.authKeyFile = /etc/nixos/tailscale-auth-key;
+   services.tailscale.extraUpFlags = [ "--hostname=<NAME>" "--accept-routes" "--ssh" ];
+
+3. Claude Code:
+   运行 `ccr remote setup <alias> --install-node` 不可行，因为 NixOS 没有传统包管理器。
+   建议先用 nix-shell 提供 nodejs/npm，再运行 `ccr remote setup <alias>`。
+EOF
+}
+
+ccr_remote_setup_test_ssh() {
+  local target="$1"
+  ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$target" 'echo OK' >/dev/null 2>&1
+}
+
+ccr_remote_setup_read_yes_no() {
+  local prompt="$1" default_no="${2:-1}" ans
+  if [[ ! -t 0 ]] || [[ "${CC_ROUTER_NO_INSTALL_PROMPT:-}" == "1" ]]; then
+    return 1
+  fi
+  if [[ "$default_no" -eq 1 ]]; then
+    read -r -p "$prompt [y/N]: " ans </dev/tty 2>/dev/null || return 1
+  else
+    read -r -p "$prompt [Y/n]: " ans </dev/tty 2>/dev/null || return 1
+  fi
+  ans="$(ccr_trim "$ans")"
+  ccr_truthy "$ans"
+}
+
+ccr_remote_setup_probe_npm_mirror() {
+  local target="$1"
+  local mirrors=(
+    "https://registry.npmjs.org/"
+    "https://registry.npmmirror.com/"
+    "https://registry.yarnpkg.com/"
+  )
+  local best="" best_time=999
+  local url start end elapsed
+  ccr_remote_onboard_info "测试 npm registry 速度..."
+  for url in "${mirrors[@]}"; do
+    start="$(date +%s.%N)"
+    if ccr_remote_ssh_exec "$target" "curl -fsS --max-time 5 -o /dev/null '$url'" >/dev/null 2>&1; then
+      end="$(date +%s.%N)"
+      elapsed="$(awk "BEGIN {print $end - $start}")"
+      ccr_remote_onboard_info "  $url: ${elapsed}s"
+      if awk "BEGIN {exit !($elapsed < $best_time)}"; then
+        best_time="$elapsed"
+        best="$url"
+      fi
+    else
+      ccr_remote_onboard_warn "  $url: 不可达"
+    fi
+  done
+  if [[ -z "$best" ]]; then
+    best="https://registry.npmjs.org/"
+    ccr_remote_onboard_warn "没有可访问的 mirror，回退到 $best"
+  else
+    ccr_remote_onboard_ok "使用 npm registry: $best"
+  fi
+  printf '%s\n' "$best"
+}
+
+ccr_remote_setup_install_nodejs() {
+  local target="$1" mirror="${2:-https://registry.npmjs.org/}"
+  ccr_remote_onboard_info "[$target] 安装 Node.js/npm..."
+
+  # Set npm registry for future npm commands
+  if [[ -n "$mirror" ]]; then
+    ccr_remote_ssh_exec "$target" "npm config set registry '$mirror'" 2>/dev/null || true
+  fi
+
+  if ccr_remote_ssh_exec "$target" "command -v apt-get" >/dev/null 2>&1; then
+    ccr_remote_ssh_exec "$target" "apt-get update -qq && apt-get install -y -qq curl ca-certificates gnupg"
+    ccr_remote_ssh_exec "$target" "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs"
+  elif ccr_remote_ssh_exec "$target" "command -v yum" >/dev/null 2>&1; then
+    ccr_remote_ssh_exec "$target" "yum install -y curl && curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - && yum install -y nodejs"
+  elif ccr_remote_ssh_exec "$target" "command -v dnf" >/dev/null 2>&1; then
+    ccr_remote_ssh_exec "$target" "dnf install -y curl && curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - && dnf install -y nodejs"
+  elif ccr_remote_ssh_exec "$target" "command -v apk" >/dev/null 2>&1; then
+    ccr_remote_ssh_exec "$target" "apk add --no-cache nodejs npm curl"
+  else
+    ccr_remote_onboard_warn "未知包管理器，尝试 nvm"
+    ccr_remote_ssh_exec "$target" "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+    ccr_remote_ssh_exec "$target" 'export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm install 22 && nvm use 22 && nvm alias default 22'
+  fi
+  ccr_remote_onboard_ok "Node.js 安装完成"
+}
+
+ccr_remote_setup_cleanup() {
+  local alias="$1"
+  shift
+  ccr_remote_onboard_cmd_cleanup "$alias" "$@"
 }
 
 ccr_remote_sync() {
@@ -580,3 +922,382 @@ ccr_remote_doctor() {
     echo '--- Telemetry env ---'; env | grep -E 'TELEMETRY|AUTOUPDATER' || echo 'no telemetry env'
   "
 }
+# ccr remote setup - interactive SSH onboarding for lab/remote machines
+# Standalone; does not depend on batch-ssh-onboard skill.
+
+set -euo pipefail
+
+# ------------------------------- defaults -------------------------------------
+
+CC_REMOTE_ONBOARD_DEFAULT_KEY="${CC_REMOTE_ONBOARD_DEFAULT_KEY:-${HOME}/.ssh/id_longgang}"
+CC_REMOTE_ONBOARD_DEFAULT_USER="${CC_REMOTE_ONBOARD_DEFAULT_USER:-root}"
+CC_REMOTE_ONBOARD_DEFAULT_PORT="${CC_REMOTE_ONBOARD_DEFAULT_PORT:-22}"
+CC_REMOTE_ONBOARD_SSH_CONFIG="${HOME}/.ssh/config"
+CC_REMOTE_ONBOARD_IDE_CACHE="${CC_REMOTE_ONBOARD_IDE_CACHE:-${HOME}/.cache/cc-onboard-ide}"
+CC_REMOTE_ONBOARD_CURSOR_PRODUCT="/Applications/Cursor.app/Contents/Resources/app/product.json"
+CC_REMOTE_ONBOARD_WARP_TARBALLS="${HOME}/Library/Application Support/dev.warp.Warp-Stable/remote-server/tarballs"
+
+# ------------------------------- ui helpers -----------------------------------
+
+ccr_remote_onboard_info()  { printf '\033[1;34m→\033[0m %s\n' "$*" >&2; }
+ccr_remote_onboard_ok()    { printf '\033[1;32m✓\033[0m %s\n' "$*" >&2; }
+ccr_remote_onboard_warn()  { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
+ccr_remote_onboard_die()   { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
+
+ccr_remote_onboard_need() {
+  local c
+  for c in "$@"; do
+    command -v "$c" >/dev/null 2>&1 || ccr_remote_onboard_die "缺少命令: $c"
+  done
+}
+
+ccr_remote_onboard_ensure_key() {
+  local key="$1"
+  if [[ -f "$key" && -f "${key}.pub" ]]; then
+    printf '%s\n' "$key"
+    return 0
+  fi
+  ccr_remote_onboard_info "生成 SSH key: $key"
+  mkdir -p "$(dirname "$key")"
+  ssh-keygen -t ed25519 -C "cc-onboard-$(whoami)" -f "$key" -N ""
+  ccr_remote_onboard_ok "密钥已生成: $key"
+  printf '%s\n' "$key"
+}
+
+ccr_remote_onboard_expand_key() {
+  local k="$1"
+  [[ "$k" == "~/"* ]] && k="${HOME}/${k#~/}"
+  printf '%s\n' "$k"
+}
+
+ccr_remote_onboard_cursor_commit() {
+  [[ -f "$CC_REMOTE_ONBOARD_CURSOR_PRODUCT" ]] || return 1
+  python3 -c "import json; print(json.load(open('$CC_REMOTE_ONBOARD_CURSOR_PRODUCT'))['commit'])" 2>/dev/null
+}
+
+ccr_remote_onboard_ssh_target() {
+  local alias="$1" user="$2" host="$3" port="$4"
+  printf '%s@%s -p %s' "$user" "$host" "$port"
+}
+
+ccr_remote_onboard_ssh_cmd() {
+  local key="$1"
+  shift
+  ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$@"
+}
+
+# ------------------------------- interactive ----------------------------------
+
+ccr_remote_onboard_prompt() {
+  local prompt="$1" default="${2:-}"
+  local value
+  if [[ -n "$default" ]]; then
+    read -r -p "${prompt} [${default}]: " value
+    value="${value:-$default}"
+  else
+    read -r -p "${prompt}: " value
+  fi
+  printf '%s\n' "$value"
+}
+
+ccr_remote_onboard_prompt_secret() {
+  local prompt="$1"
+  local value
+  read -r -s -p "${prompt}: " value
+  echo >&2
+  printf '%s\n' "$value"
+}
+
+# ------------------------------- config ---------------------------------------
+
+ccr_remote_onboard_write_ssh_config() {
+  local alias="$1" ip="$2" user="$3" port="$4" key="$5"
+  mkdir -p "$(dirname "$CC_REMOTE_ONBOARD_SSH_CONFIG")"
+  touch "$CC_REMOTE_ONBOARD_SSH_CONFIG"
+  chmod 600 "$CC_REMOTE_ONBOARD_SSH_CONFIG"
+
+  # Remove existing block for this alias
+  if grep -q "^Host ${alias}$" "$CC_REMOTE_ONBOARD_SSH_CONFIG" 2>/dev/null; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v a="$alias" '$0 ~ "^Host " a "$" {skip=1; next} skip && /^Host / {skip=0} !skip {print}' \
+      "$CC_REMOTE_ONBOARD_SSH_CONFIG" > "$tmp" && mv "$tmp" "$CC_REMOTE_ONBOARD_SSH_CONFIG"
+  fi
+
+  cat >> "$CC_REMOTE_ONBOARD_SSH_CONFIG" <<EOF
+
+# ccr remote setup: ${alias}
+Host ${alias}
+  HostName ${ip}
+  User ${user}
+  Port ${port}
+  IdentityFile ${key}
+  IdentitiesOnly yes
+  AddKeysToAgent yes
+  UseKeychain yes
+  ServerAliveInterval 20
+  ServerAliveCountMax 6
+EOF
+}
+
+# ------------------------------- onboard core ---------------------------------
+
+ccr_remote_onboard_do_onboard() {
+  local alias="$1" ip="$2" user="$3" port="$4" password="$5" key="$6" do_seed="$7"
+
+  key="$(ccr_remote_onboard_expand_key "$key")"
+  key="$(ccr_remote_onboard_ensure_key "$key")"
+  local pub="${key}.pub"
+
+  ccr_remote_onboard_need ssh scp sshpass
+
+  local target
+  target="$(ccr_remote_onboard_ssh_target "$alias" "$user" "$ip" "$port")"
+
+  ccr_remote_onboard_info "[$alias] 上传公钥到 ${user}@${ip}:${port}"
+  SSHPASS="$password" sshpass -e ssh -p "$port" -o StrictHostKeyChecking=accept-new \
+    "${user}@${ip}" 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+
+  SSHPASS="$password" sshpass -e scp -P "$port" "$pub" "${user}@${ip}:/tmp/cc_onboard_pubkey.tmp"
+  SSHPASS="$password" sshpass -e ssh -p "$port" "${user}@${ip}" \
+    'grep -qxF -f /tmp/cc_onboard_pubkey.tmp ~/.ssh/authorized_keys 2>/dev/null || cat /tmp/cc_onboard_pubkey.tmp >> ~/.ssh/authorized_keys; rm -f /tmp/cc_onboard_pubkey.tmp'
+  ccr_remote_onboard_ok "公钥已写入 authorized_keys"
+
+  ccr_remote_onboard_info "[$alias] 写入 ~/.ssh/config"
+  ccr_remote_onboard_write_ssh_config "$alias" "$ip" "$user" "$port" "$key"
+  ccr_remote_onboard_ok "SSH config 已更新"
+
+  ccr_remote_onboard_info "[$alias] 验证免密登录"
+  if ! ccr_remote_onboard_ssh_cmd "$key" -p "$port" "${user}@${ip}" 'echo OK && hostname && whoami'; then
+    ccr_remote_onboard_die "免密登录验证失败"
+  fi
+  ccr_remote_onboard_ok "SSH 免密可用: ssh ${alias}"
+
+  if [[ "$do_seed" == "1" ]]; then
+    ccr_remote_onboard_seed "$alias" "$key"
+  fi
+}
+
+# ------------------------------- seed ide -------------------------------------
+
+ccr_remote_onboard_cursor_extracted_ok() {
+  local extracted="$1"
+  [[ -x "${extracted}/node" ]] || [[ -x "${extracted}/bin/remote-cli/cursor" ]]
+}
+
+ccr_remote_onboard_download_cursor_cdn() {
+  local commit="$1"
+  local tarball="${CC_REMOTE_ONBOARD_IDE_CACHE}/cursor/${commit}/vscode-reh-linux-x64.tar.gz"
+  local extracted="${CC_REMOTE_ONBOARD_IDE_CACHE}/cursor/${commit}/extracted"
+  local url="https://cursor.blob.core.windows.net/remote-releases/${commit}/vscode-reh-linux-x64.tar.gz"
+  local only
+
+  ccr_remote_onboard_need curl tar
+  mkdir -p "${CC_REMOTE_ONBOARD_IDE_CACHE}/cursor/${commit}"
+  ccr_remote_onboard_info "CDN 下载 Cursor server ${commit}..."
+  curl -fL --retry 3 --retry-delay 2 -o "${tarball}.partial" "$url"
+  mv "${tarball}.partial" "$tarball"
+  rm -rf "$extracted"
+  mkdir -p "$extracted"
+  tar -xzf "$tarball" -C "$extracted"
+  if [[ "$(find "$extracted" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 1 ]]; then
+    only="$(find "$extracted" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    if [[ -n "$only" ]]; then
+      shopt -s dotglob nullglob
+      mv "$only"/* "$extracted"/
+      shopt -u dotglob nullglob
+      rmdir "$only" 2>/dev/null || true
+    fi
+  fi
+  ccr_remote_onboard_ok "Cursor ${commit} 下载完成"
+}
+
+ccr_remote_onboard_ensure_cursor_local() {
+  local allow_cdn="${1:-0}"
+  local commit
+  commit="$(ccr_remote_onboard_cursor_commit)" || ccr_remote_onboard_die "找不到 Cursor product.json"
+  local extracted="${CC_REMOTE_ONBOARD_IDE_CACHE}/cursor/${commit}/extracted"
+
+  if ccr_remote_onboard_cursor_extracted_ok "$extracted"; then
+    ccr_remote_onboard_ok "本机已有 Cursor ${commit}"
+    printf '%s\n' "$commit"
+    return 0
+  fi
+
+  if [[ "$allow_cdn" == "1" ]]; then
+    ccr_remote_onboard_download_cursor_cdn "$commit"
+    printf '%s\n' "$commit"
+    return 0
+  fi
+
+  ccr_remote_onboard_die "本机缺少 Cursor server ${commit}。\n  可选: 1) 先让本机 Remote-SSH 连一次目标自动下载; 2) 用 --cdn 允许公网下载"
+}
+
+ccr_remote_onboard_ensure_warp_local() {
+  local latest version tgz extracted
+
+  [[ -d "$CC_REMOTE_ONBOARD_WARP_TARBALLS" ]] || return 1
+  latest="$(find "$CC_REMOTE_ONBOARD_WARP_TARBALLS" -maxdepth 1 -type d -name 'v*' | sort | tail -1)"
+  [[ -n "$latest" ]] || return 1
+  version="$(basename "$latest")"
+  tgz="${latest}/linux-x86_64/oz.tar.gz"
+  [[ -f "$tgz" ]] || return 1
+
+  extracted="${CC_REMOTE_ONBOARD_IDE_CACHE}/warp/${version}"
+  mkdir -p "$extracted"
+  if [[ -e "${extracted}/.ready" ]]; then
+    ccr_remote_onboard_ok "本机已有 Warp ${version}"
+  else
+    ccr_remote_onboard_info "解压 Warp ${version}..."
+    tar -xzf "$tgz" -C "$extracted"
+    if [[ -f "${extracted}/oz" && ! -e "${extracted}/oz-${version}" ]]; then
+      mv "${extracted}/oz" "${extracted}/oz-${version}"
+    fi
+    touch "${extracted}/.ready"
+    ccr_remote_onboard_ok "Warp ${version} 解压完成"
+  fi
+  printf '%s\n' "$extracted"
+}
+
+ccr_remote_onboard_seed() {
+  local alias="$1"
+  local key="${2:-$CC_REMOTE_ONBOARD_DEFAULT_KEY}"
+  local allow_cdn="${3:-0}"
+  key="$(ccr_remote_onboard_expand_key "$key")"
+
+  ccr_remote_onboard_need ssh rsync
+
+  local commit
+  commit="$(ccr_remote_onboard_ensure_cursor_local "$allow_cdn")"
+
+  ccr_remote_onboard_info "[$alias] 推送 Cursor server ${commit}"
+  ssh -i "$key" -o IdentitiesOnly=yes "$alias" \
+    "mkdir -p ~/.cursor-server/bin/linux-x64/${commit}"
+  rsync -av --progress \
+    -e "ssh -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+    "${CC_REMOTE_ONBOARD_IDE_CACHE}/cursor/${commit}/extracted/" \
+    "${alias}:~/.cursor-server/bin/linux-x64/${commit}/"
+  ccr_remote_onboard_ok "Cursor -> ${alias}:~/.cursor-server/bin/linux-x64/${commit}/"
+
+  local warp_path
+  if warp_path="$(ccr_remote_onboard_ensure_warp_local 2>/dev/null)"; then
+    ccr_remote_onboard_info "[$alias] 推送 Warp remote-server"
+    ssh -i "$key" -o IdentitiesOnly=yes "$alias" 'mkdir -p ~/.warp/remote-server'
+    rsync -av --progress \
+      -e "ssh -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+      --exclude '.ready' \
+      "${warp_path}/" \
+      "${alias}:~/.warp/remote-server/"
+    ccr_remote_onboard_ok "Warp 已推送"
+  fi
+}
+
+# ------------------------------- tailscale ------------------------------------
+
+ccr_remote_onboard_tailscale() {
+  local alias="$1" auth_key="$2" hostname="${3:-$1}"
+  local key="${4:-$CC_REMOTE_ONBOARD_DEFAULT_KEY}"
+  local port="${5:-$CC_REMOTE_ONBOARD_DEFAULT_PORT}"
+  key="$(ccr_remote_onboard_expand_key "$key")"
+
+  [[ -n "$auth_key" ]] || ccr_remote_onboard_die "缺少 --auth-key"
+  ccr_remote_onboard_need ssh scp
+
+  # Detect NixOS: it cannot use curl|sh and needs configuration.nix
+  local is_nixos=0
+  if ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -p "$port" "$alias" \
+       'test -f /etc/NIXOS' 2>/dev/null; then
+    is_nixos=1
+  fi
+
+  if [[ "$is_nixos" -eq 1 ]]; then
+    ccr_remote_onboard_warn "[$alias] 检测到 NixOS，不能直接 curl|sh 安装 Tailscale。"
+    cat <<EOF
+
+请在远程主机上执行以下操作：
+
+1. 把 auth key 写入文件：
+   sudo mkdir -p /etc/nixos
+   echo '${auth_key}' | sudo tee /etc/nixos/tailscale-auth-key
+   sudo chmod 600 /etc/nixos/tailscale-auth-key
+
+2. 编辑 /etc/nixos/configuration.nix，在 services 块里添加：
+
+  services.tailscale = {
+    enable = true;
+    authKeyFile = "/etc/nixos/tailscale-auth-key";
+    extraUpFlags = [
+      "--hostname=${hostname}"
+      "--accept-routes"
+      "--ssh"
+    ];
+  };
+
+  # 如果希望作为 exit node，再加上：
+  # "--advertise-exit-node"
+
+3. 应用配置：
+   sudo nixos-rebuild switch
+
+4. （可选）如果用了 --advertise-exit-node，去 Tailscale Admin 控制台 approve。
+
+EOF
+    return 1
+  fi
+
+  ccr_remote_onboard_info "[$alias] 安装 Tailscale..."
+  ssh -i "$key" -o IdentitiesOnly=yes -p "$port" "$alias" \
+    'curl -fsSL https://tailscale.com/install.sh | sh'
+
+  ccr_remote_onboard_info "[$alias] 加入 tailnet (hostname=${hostname})"
+  ssh -i "$key" -o IdentitiesOnly=yes -p "$port" "$alias" \
+    "tailscale up --auth-key=${auth_key} --hostname=${hostname} --accept-routes --ssh"
+  ssh -i "$key" -o IdentitiesOnly=yes -p "$port" "$alias" 'tailscale status'
+  ccr_remote_onboard_ok "Tailscale 就绪"
+}
+
+# ------------------------------- cleanup --------------------------------------
+
+ccr_remote_onboard_cleanup() {
+  local alias="$1" ip="${2:-}"
+  local key="${3:-$CC_REMOTE_ONBOARD_DEFAULT_KEY}"
+  local port="${4:-$CC_REMOTE_ONBOARD_DEFAULT_PORT}"
+  key="$(ccr_remote_onboard_expand_key "$key")"
+
+  ccr_remote_onboard_need ssh
+
+  ccr_remote_onboard_info "[$alias] 远程清理"
+  ssh -i "$key" -o IdentitiesOnly=yes -p "$port" "$alias" bash -s <<'REMOTE'
+set -e
+tailscale logout 2>/dev/null || true
+systemctl stop tailscaled 2>/dev/null || true
+systemctl disable tailscaled 2>/dev/null || true
+apt-get purge -y tailscale tailscale-archive-keyring 2>/dev/null || true
+rm -rf /var/lib/tailscale /var/log/tailscale*
+if [[ -f ~/.ssh/authorized_keys ]]; then
+  grep -v 'cc-onboard' ~/.ssh/authorized_keys > /tmp/cc_onboard_ak || true
+  mv /tmp/cc_onboard_ak ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+fi
+rm -rf ~/.cursor-server ~/.warp ~/.config/warp-terminal
+echo "REMOTE CLEANUP DONE"
+REMOTE
+  ccr_remote_onboard_ok "远程清理完成"
+
+  ccr_remote_onboard_info "[$alias] 本机清理 ~/.ssh/config"
+  if [[ -f "$CC_REMOTE_ONBOARD_SSH_CONFIG" ]]; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v a="$alias" '
+      $0 ~ "^# ccr remote setup: " a "$" {skip=1; next}
+      $0 ~ "^Host " a "$" {skip=1; next}
+      skip && /^$/ {skip=0; next}
+      skip && /^Host / {skip=0}
+      !skip {print}
+    ' "$CC_REMOTE_ONBOARD_SSH_CONFIG" > "$tmp" && mv "$tmp" "$CC_REMOTE_ONBOARD_SSH_CONFIG"
+  fi
+  [[ -n "$ip" ]] && ssh-keygen -R "$ip" 2>/dev/null || true
+  ssh-keygen -R "$alias" 2>/dev/null || true
+  ccr_remote_onboard_ok "本机 config / known_hosts 已清理"
+}
+

@@ -64,15 +64,20 @@ ccr remote pack --skip-download
 
 打包目录：`~/.local/share/cc-router/remote-pack/`
 
-### 2. 添加 SSH 主机（可选）
+### 2. 添加 SSH 主机
+
+`ccr remote setup` 会自动把 pubkey 上传到只有密码的新机器，并写入 `~/.ssh/config`。如果你已经配好了免密 SSH，可以直接用 alias。
 
 ```bash
-# 通过用户名+主机
-ccr remote setup user@192.168.1.100
-
-# 或者先配置 ssh 别名
-ccr remote ssh-config add lgsj-h100 192.168.1.100 lgsj 22 ~/.ssh/id_rsa
+# 新机器：交互式 onboarding
 ccr remote setup lgsj-h100
+# 按提示输入 IP / user / password
+
+# 或者一次性传参
+ccr remote setup lgsj-h100 --ip 192.168.1.100 --user lgsj --password 'xxx' --no-confirm
+
+# 已有免密 SSH 时
+ccr remote setup user@192.168.1.100
 ```
 
 ### 3. 部署到远程
@@ -82,10 +87,15 @@ ccr remote setup lgsj-h100
 ```
 
 流程：
-1. scp 传安装包到 `/tmp/cc-router-remote-pack/`
-2. 远程执行安装脚本
-3. 写入 `~/.claude/settings.json`、`~/.claude/CLAUDE.md`、技能包
-4. 在 `~/.profile` 追加 telemetry 关闭环境变量
+1. 如果还没有免密 SSH，用密码上传 pubkey 并写入 `~/.ssh/config`
+2. 探测远程 OS / 架构
+3. 如果远程没有 npm，提示并自动安装 Node.js（会测试并选用最快的 npm mirror）
+4. scp 传安装包到 `/tmp/cc-router-remote-pack/`
+5. 远程执行安装脚本
+6. 写入 `~/.claude/settings.json`、`~/.claude/CLAUDE.md`、技能包
+7. 在 `~/.profile` 追加 telemetry 关闭环境变量
+8. 可选：安装 Tailscale、推送 Cursor/Warp IDE server 缓存
+9. 运行 `ccr remote doctor` 检查环境
 
 ### 4. 连接并启动 Claude Code
 
@@ -155,7 +165,7 @@ ccr remote skills
 | 命令 | 说明 |
 |------|------|
 | `ccr-remote pack` | 本机预下载和打包 |
-| `ccr-remote setup <host>` | 全量部署 |
+| `ccr-remote setup [alias]` | 交互式 all-in-one onboarding |
 | `ccr-remote sync <host>` | 只同步配置和技能 |
 | `ccr-remote ssh <host> [dir] [args]` | SSH 并启动 Claude Code |
 
@@ -189,7 +199,7 @@ Windows 命令相同，路径用 `C:\project` 格式。
 
 ## 已知限制
 
-- 远程必须已安装 Node.js + npm（脚本会检查）
+- 远程最好已安装 Node.js + npm；没有时 `ccr remote setup` 会提示安装
 - Windows 远程需要 PowerShell + OpenSSH 服务端，目前主要优化 Linux 场景
 - 技能包中的符号链接会被复制为实际文件（`-L`）
 - macOS 默认 bash 为 3.2，脚本已做兼容

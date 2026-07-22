@@ -8,6 +8,7 @@ tests=(
   "${ROOT_DIR}/scripts/test/test-ccr-worktree.sh"
   "${ROOT_DIR}/scripts/test/test-ccr-model-routing.sh"
   "${ROOT_DIR}/scripts/test/test-ccr-doctor.sh"
+  "${ROOT_DIR}/scripts/test/test-ccr-remote-setup.sh"
 )
 
 for test_script in "${tests[@]}"; do
