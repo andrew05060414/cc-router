@@ -18,7 +18,8 @@
     - [4.4 CC Switch](#44-cc-switch)
     - [4.5 Kimi](#45-kimi)
   - [5. 远程服务器](#5-远程服务器)
-    - [5.1 快速 onboarding（推荐）](#51-快速-onboarding推荐)
+    - [5.1 首次 onboarding（推荐）](#51-首次-onboarding推荐)
+    - [5.1.1 日常配置调整（setup）](#511-日常配置调整setup)
     - [5.2 分步安装](#52-分步安装)
     - [5.3 远程配置同步](#53-远程配置同步)
     - [5.4 诊断](#54-诊断)
@@ -58,7 +59,8 @@ export PATH="$HOME/.local/bin:$PATH"
 | **vendor 模板** | `templates/remote/{kimi,deepseek,anthropic,default}.json` 定义远程机器的 env/model。 |
 | **持久化（--persist）** | 把某个 vendor 的 env 块写进 shell profile，以后直接 `claude` 即生效。 |
 | **bootstrap** | Kimi 模式下自动跳过登录、清理 stale model key。 |
-| **remote setup** | 把一台新机器从「只有密码」变成「可免密 SSH + 可 Claude + 可 Cursor/Warp + 可 Tailscale」。 |
+| **remote onboard** | 首次一键：密码机 → 免密 SSH + Node/Claude + 配置同步；可选 Tailscale / IDE seed。 |
+| **remote setup** | 按步骤菜单选择性配置；默认只做 **sync**，适合日常改 Claude 配置。 |
 
 ---
 
@@ -73,7 +75,8 @@ ccr switch                       # CC Switch 代理
 ccr kimi                         # Kimi for Coding
 
 ccr remote install <host>        # 把 ccr 安装到远程
-ccr remote setup [alias] [opts]  # 交互式 all-in-one onboarding
+ccr remote onboard [alias] [opts]# 首次 all-in-one onboarding
+ccr remote setup [alias] [opts]  # 可选步骤配置菜单（默认 sync）
 ccr remote sync <host>           # 同步配置到远程
 ccr remote ssh <host>            # SSH 进远程并启动 claude
 ccr remote doctor <host>         # 检查远程环境
@@ -170,41 +173,80 @@ ccr kimi --persist
 
 ## 5. 远程服务器
 
-### 5.1 快速 onboarding（推荐）
+心智模型：`ccr remote *` 在**本机**打包，经 **SSH** 推到远端安装。`onboard` = 首次全流程；`setup` = 事后按步骤微调。
 
-一条命令完成：上传 SSH 公钥、写 `~/.ssh/config`、安装 Claude Code、同步配置、可选安装 Tailscale / 推送 Cursor/Warp IDE 缓存。
+| 场景 | 用哪个 |
+|------|--------|
+| 新机器只有密码，第一次配 | `ccr remote onboard` |
+| 已免密，只想同步 settings / skills | `ccr remote setup --steps sync` 或 `ccr remote sync` |
+| 已免密，要重装 Claude / Node | `ccr remote setup --steps node,claude,sync` |
+
+### 5.1 首次 onboarding（推荐）
+
+默认步骤：`ssh` → `node` → `claude` → `sync`。传 `--seed-ide` / `--tailscale-auth-key` 时再追加对应步骤。
 
 非交互式：
 
 ```bash
-ccr remote setup nas-2b --ip 10.18.23.131 --user lgsj --password 'Lgsj@123.' --no-confirm
+ccr remote onboard nas-2b \
+  --ip 10.18.23.131 \
+  --user lgsj \
+  --password 'Lgsj@123.' \
+  --no-confirm
 ```
 
 纯交互式：
 
 ```bash
-ccr remote setup
-# 按提示输入 alias / ip / user / password，并选择是否执行可选步骤
+ccr remote onboard
+# 按提示输入 alias / ip / user / password
 ```
+
+**alias 冲突：** 若 `~/.ssh/config` 里已有同名 `Host`：
+
+- 交互：询问 **[r]eplace** / **re[u]se** / **[a]bort**
+- `--no-confirm`：默认 **reuse**（不重灌公钥）。若 config 在、远端公钥却丢了，先删掉该 `Host` 块再 onboard，或交互选 replace
 
 常用选项：
 
-- `--seed-ide` — 自动推送 Cursor/Warp IDE server 缓存
-- `--tailscale-auth-key tskey-auth-xxx` — 自动安装并加入 Tailscale
-- `--install-node` — 远程没有 npm 时自动安装 Node.js（会测试并选用最快的 npm mirror）
-- `--no-install-node` — 远程没有 npm 时跳过安装
+- `--port PORT` — SSH 端口（默认 22；Docker 映射常见 `2222`）
+- `--key PATH` — 私钥路径（默认见环境变量）
+- `--no-install-node` — 跳过 Node 安装（默认步骤里会去掉 `node`）
+- `--seed-ide` — 推送 Cursor/Warp IDE server 缓存
+- `--tailscale-auth-key tskey-auth-xxx` — 安装并加入 Tailscale
 - `--dry-run` — 只打印步骤，不执行
+
+本机会按远端架构打包（含 **musl**，如 Alpine → `linux-*-musl`）。远端没有 npm 时会测 mirror 速度再装 Node。
+
+### 5.1.1 日常配置调整（setup）
+
+`setup` 默认**只做 sync**。交互会逐步勾选；非交互用 `--steps`。
+
+```bash
+# 交互式菜单（默认勾选 sync）
+ccr remote setup nas-2b
+
+# 非交互，只同步配置
+ccr remote setup nas-2b --steps sync --no-confirm
+
+# 非交互，重做 SSH + Node + Claude + 同步
+ccr remote setup nas-2b --steps ssh,node,claude,sync --no-confirm
+```
+
+可选步骤：`ssh`、`node`、`claude`、`sync`、`tailscale`、`seed`。
+
+等价捷径：只同步时也可直接 `ccr remote sync nas-2b`。
 
 ### 5.2 分步安装
 
-如果已经能免密 SSH，可以直接装 Claude Code：
+如果已经能免密 SSH：
 
 ```bash
-# 1. 把 ccr 自身推过去
+# 1. 把 ccr 自身推过去（可选）
 ccr remote install nas-2b
 
-# 2. 在远程装 Claude Code（ interactive setup 的精简版）
-ccr remote setup nas-2b
+# 2. 装 Claude + 同步（不必再走完整 onboard）
+ccr remote setup nas-2b --steps node,claude,sync --no-confirm
 
 # 3. 在远程配置 Kimi key（登录后执行）
 ssh nas-2b
@@ -213,10 +255,12 @@ ccr kimi --token sk-kimi-xxx --persist
 
 ### 5.3 远程配置同步
 
-更新本机模板/CLAUDE.md/skills 后，同步到远程：
+更新本机模板 / CLAUDE.md / skills 后：
 
 ```bash
 ccr remote sync nas-2b
+# 或
+ccr remote setup nas-2b --steps sync --no-confirm
 ```
 
 ### 5.4 诊断
@@ -265,9 +309,9 @@ ccr remote doctor <host># 远程诊断
 | `CC_REMOTE_VENDOR` | 默认远程 vendor（kimi/deepseek/anthropic/default） |
 | `CC_REMOTE_AUTH_TOKEN` | 远程 settings.json 使用的 token |
 | `CC_REMOTE_SETTINGS_MODE` | `local` / `remote` / `default` |
-| `CC_REMOTE_ONBOARD_DEFAULT_KEY` | remote setup 默认 SSH key |
-| `CC_REMOTE_ONBOARD_DEFAULT_USER` | remote setup 默认用户 |
-| `CC_REMOTE_ONBOARD_DEFAULT_PORT` | remote setup 默认端口 |
+| `CC_REMOTE_ONBOARD_DEFAULT_KEY` | onboard / setup 默认 SSH key |
+| `CC_REMOTE_ONBOARD_DEFAULT_USER` | onboard / setup 默认用户 |
+| `CC_REMOTE_ONBOARD_DEFAULT_PORT` | onboard / setup 默认端口 |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `ANTHROPIC_AUTH_TOKEN` | Kimi / 通用 token |
 | `ANTHROPIC_API_KEY` | 同上 |
@@ -285,13 +329,40 @@ ccr remote install nas-2b -v
 ccr remote install nas-2b -n
 ```
 
+**Q: `onboard` 和 `setup` 有啥区别？**
+
+- `onboard`：首次全流程，默认 `ssh,node,claude,sync`
+- `setup`：按需选步骤，默认只 `sync`
+
+**Q: `--no-confirm` 时 alias 已存在，为什么没灌公钥？**
+
+非交互默认 **reuse**。若远端 `authorized_keys` 丢了，交互选 **replace**，或删掉 `~/.ssh/config` 里对应 `Host` 块后再跑 onboard。
+
+**Q: Alpine / musl 机器装不上 Claude？**
+
+本机会打 `linux-*-musl` 包。若旧版远端脚本把 musl 误判成 gnu，更新本机 `ccr`（`./install.sh`）后执行：
+
+```bash
+ccr remote setup <alias> --steps claude,sync --no-confirm
+```
+
+**Q: 远程 Node 版本太旧？**
+
+Claude Code 需要 Node **≥ 22**。部分发行版包管理器仍给 20（会有 `EBADENGINE` 警告，偶发仍能跑）。长期建议在远端装 Node 22+。
+
 **Q: 远程 npm global prefix 不可写（如 NixOS）？**
 
-`ccr remote setup` 会自动检测并切换到 `~/.local`，把 `~/.local/bin` 加进 PATH 即可。
+安装脚本会检测并切到 `~/.local`，把 `~/.local/bin` 加进 PATH 即可。
 
 **Q: Tailscale 在 NixOS 上怎么装？**
 
-`ccr remote setup nas-2b --tailscale-auth-key xxx` 会检测 NixOS 并给出 `configuration.nix` 配置片段。
+```bash
+ccr remote onboard nas-2b --tailscale-auth-key xxx
+# 或
+ccr remote setup nas-2b --steps tailscale --tailscale-auth-key xxx --no-confirm
+```
+
+会检测 NixOS 并给出 `configuration.nix` 配置片段。
 
 **Q: 旧命令还能用吗？**
 
