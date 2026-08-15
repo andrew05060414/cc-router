@@ -64,29 +64,45 @@ ccr remote pack --skip-download
 
 打包目录：`~/.local/share/cc-router/remote-pack/`
 
-### 2. 添加 SSH 主机
+### 2. 添加 SSH 主机 / 首次 onboarding
 
-`ccr remote setup` 会自动把 pubkey 上传到只有密码的新机器，并写入 `~/.ssh/config`。如果你已经配好了免密 SSH，可以直接用 alias。
+`ccr remote onboard` 会把一台只有密码的新机器变成可用状态：上传 pubkey、写 `~/.ssh/config`、安装 Node.js / Claude Code、同步配置、可选 Tailscale / IDE seed。如果你已经配好了免密 SSH，可以直接用 alias。
 
 ```bash
 # 新机器：交互式 onboarding
-ccr remote setup lgsj-h100
-# 按提示输入 IP / user / password
+ccr remote onboard lgsj-h100
+# 按提示输入 IP / user / password，并选择是否执行可选步骤
 
 # 或者一次性传参
-ccr remote setup lgsj-h100 --ip 192.168.1.100 --user lgsj --password 'xxx' --no-confirm
+ccr remote onboard lgsj-h100 --ip 192.168.1.100 --user lgsj --password 'xxx' --no-confirm
 
 # 已有免密 SSH 时
-ccr remote setup user@192.168.1.100
+ccr remote onboard user@192.168.1.100
 ```
 
-### 3. 部署到远程
+如果 alias 已经存在于 `~/.ssh/config`，`onboard` 会询问是 **replace**（替换并重新上传公钥）、**reuse**（复用现有 SSH 配置继续后续步骤）还是 **abort**。
+
+### 3. 日常配置调整
+
+`ccr remote setup` 是一个可选步骤菜单，默认只执行 **sync**。适合重复调用，只改 Claude 相关配置而不想碰 SSH。
 
 ```bash
+# 交互式菜单（默认勾选 sync）
 ccr remote setup lgsj-h100
+
+# 非交互，只同步配置
+ccr remote setup lgsj-h100 --steps sync --no-confirm
+
+# 非交互，重装 SSH + Node + Claude + 同步
+ccr remote setup lgsj-h100 --steps ssh,node,claude,sync --no-confirm
 ```
 
-流程：
+可选步骤：`ssh`、`node`、`claude`、`sync`、`tailscale`、`seed`。
+
+### 4. onboard / setup 流程
+
+`ccr remote onboard` 默认会依次询问以下步骤：
+
 1. 如果还没有免密 SSH，用密码上传 pubkey 并写入 `~/.ssh/config`
 2. 探测远程 OS / 架构
 3. 如果远程没有 npm，提示并自动安装 Node.js（会测试并选用最快的 npm mirror）
@@ -165,7 +181,9 @@ ccr remote skills
 | 命令 | 说明 |
 |------|------|
 | `ccr-remote pack` | 本机预下载和打包 |
-| `ccr-remote setup [alias]` | 交互式 all-in-one onboarding |
+| `ccr-remote onboard [alias]` | 首次 all-in-one onboarding |
+| `ccr-remote setup [alias]` | 可选步骤配置菜单（默认 sync） |
+
 | `ccr-remote sync <host>` | 只同步配置和技能 |
 | `ccr-remote ssh <host> [dir] [args]` | SSH 并启动 Claude Code |
 
@@ -199,7 +217,10 @@ Windows 命令相同，路径用 `C:\project` 格式。
 
 ## 已知限制
 
-- 远程最好已安装 Node.js + npm；没有时 `ccr remote setup` 会提示安装
+- 远程最好已安装 Node.js **≥ 22** + npm；没有时 `ccr remote onboard` 会尝试安装（部分发行版 apk/apt 仍给 Node 20）
+- Alpine 等 musl 环境会打包 `linux-*-musl`；更新本机 `ccr` 后再跑 `setup --steps claude` 可避免旧脚本误判 libc
+- `--no-confirm` 且 alias 已存在时默认 **reuse**（不重灌公钥）
+
 - Windows 远程需要 PowerShell + OpenSSH 服务端，目前主要优化 Linux 场景
 - 技能包中的符号链接会被复制为实际文件（`-L`）
 - macOS 默认 bash 为 3.2，脚本已做兼容

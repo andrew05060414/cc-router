@@ -17,7 +17,10 @@ Most behavior is controlled through `ccr setup` and `ccr config`, so users can k
 > [`docs/TODO.md`](docs/TODO.md).
 >
 > **Remote server onboarding?** See [`docs/CR-REMOTE.md`](docs/CR-REMOTE.md)
-> and run `ccr remote pack` then `ccr remote setup <host>`.
+> and [`docs/CCR-USER-MANUAL.md`](docs/CCR-USER-MANUAL.md) §5.
+> First-time: `ccr remote pack` then `ccr remote onboard <alias>`.
+> Day-to-day sync: `ccr remote setup <alias> --steps sync`.
+
 
 Supported now:
 
@@ -44,7 +47,8 @@ Remote onboarding from Windows:
 
 ```powershell
 ccr remote pack
-ccr remote setup lgsj-h100
+ccr remote onboard lgsj-h100
+
 ccr remote ssh lgsj-h100 C:\RemoteProject
 ```
 

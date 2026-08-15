@@ -105,7 +105,9 @@ ccr remote - remote server Claude Code onboarding
 Usage:
   ccr remote pack [--platforms linux-x64,linux-arm64] [--skip-download] [--vendor kimi|deepseek|anthropic|default]
   ccr remote install [-v|--verbose] [-n|--dry-run] <host|alias>  # install ccr itself on remote host via SSH
-  ccr remote setup [alias] [options]       # interactive all-in-one onboarding
+  ccr remote onboard [alias] [options]     # interactive all-in-one first-time onboarding
+  ccr remote setup [alias] [options]       # selective configuration menu (default: sync)
+
   ccr remote push <host|alias>             # push current ccr scripts/templates to remote host
   ccr remote sync <host|alias>
   ccr remote ssh <host|alias> [claude args...]
@@ -951,9 +953,17 @@ ccr_remote_dispatch() {
       shift
       ccr_remote_install "$host" "$@"
       ;;
+    onboard)
+      if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+        ccr_remote_setup_show_help "onboard"
+        exit 0
+      fi
+      ccr_remote_onboard "$@"
+      ;;
     setup)
       if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
-        ccr_remote_setup_show_help
+        ccr_remote_setup_show_help "setup"
+
         exit 0
       fi
       ccr_remote_setup "$@"
